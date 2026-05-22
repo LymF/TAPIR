@@ -168,33 +168,52 @@ python tapir.py --version
 
 ### Tools on servers without AVX2
 
-Some servers (particularly older CPUs) do not support the AVX2 instruction set required by the default MMseqs2 conda build. To check:
+Bioconda packages are built on modern machines and may require AVX2. On servers without AVX2 support, SPAdes, MEGAHIT, and MMseqs2 will crash immediately with an illegal instruction error (exit code -4 / SIGILL).
+
+To check:
 
 ```bash
 grep -o 'avx2' /proc/cpuinfo | head -1   # empty = no AVX2
 ```
 
-If AVX2 is absent, both MMseqs2 and SPAdes 4.x will crash with SIGILL. Fix each as follows:
+The recommended fix is to compile each tool from source directly on the server. CMake will auto-detect the CPU and compile for the available instruction set (SSE4.1, SSE2, etc.), producing a fully compatible binary.
 
-**MMseqs2** — replace with the SSE4.1 static build:
+**SPAdes** — compile latest version from source:
 
 ```bash
-# Check for SSE4.1
-grep -o 'sse4_1' /proc/cpuinfo | head -1
+conda install -c conda-forge cmake make -y
+git clone --branch v4.2.0 --depth 1 https://github.com/ablab/spades.git
+cd spades && ./spades_compile.sh
+cp bin/spades-core $(dirname $(which spades.py))/spades-core
+cd .. && spades.py --version
+```
 
-# If SSE4.1 available:
+**MEGAHIT** — compile latest version from source:
+
+```bash
+git clone --branch v1.2.9 --depth 1 https://github.com/voutcn/megahit.git
+cd megahit && git submodule update --init
+mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+make -j$(nproc)
+CONDA_BIN=$(dirname $(which megahit))
+cp megahit megahit_core megahit_toolkit $CONDA_BIN/
+cp megahit_core_popcnt $CONDA_BIN/ 2>/dev/null || true
+cd ../.. && megahit --version
+```
+
+**MMseqs2** — replace with the SSE4.1 static build (v13, stable):
+
+```bash
+grep -o 'sse4_1' /proc/cpuinfo | head -1   # check SSE4.1 support
+
+# SSE4.1 available:
 wget https://github.com/soedinglab/MMseqs2/releases/download/13-45111/mmseqs-linux-sse41.tar.gz
 tar xvf mmseqs-linux-sse41.tar.gz && cp mmseqs/bin/mmseqs $(which mmseqs)
 
-# If SSE4.1 not available (use SSE2 — always compatible):
+# No SSE4.1 (use SSE2 — always compatible):
 wget https://github.com/soedinglab/MMseqs2/releases/download/13-45111/mmseqs-linux-sse2.tar.gz
 tar xvf mmseqs-linux-sse2.tar.gz && cp mmseqs/bin/mmseqs $(which mmseqs)
-```
-
-**SPAdes** — install version 3.15.5 (compiled without AVX2):
-
-```bash
-mamba install -c bioconda "spades=3.15.5" --channel-priority flexible --force-reinstall
 ```
 
 ---
