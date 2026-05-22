@@ -167,6 +167,7 @@ tapir --version
 ### Option B — Docker
 
 > Fully self-contained — no environment setup required.
+> Image available at: `ghcr.io/lymf/tapir:latest`
 
 ```bash
 # Pull and run
@@ -175,12 +176,16 @@ docker run --rm -v /your/data:/data ghcr.io/lymf/tapir:latest \
     -i /data/reads -o /data/results \
     --host-genome /data/host.fa \
     -t 16 --ram 64 --email your@email.edu
+```
 
-# Build locally from source
-git clone https://github.com/LymF/TAPIR.git
-cd TAPIR
-docker build -t tapir .
-docker run --rm -v /your/data:/data tapir \
+**On HPC/shared servers without Docker root access — use Singularity/Apptainer:**
+
+```bash
+# Pull Docker image as a Singularity image file
+singularity pull tapir.sif docker://ghcr.io/lymf/tapir:latest
+
+# Run
+singularity run tapir.sif \
     -i /data/reads -o /data/results \
     --host-genome /data/host.fa \
     -t 16 --ram 64 --email your@email.edu
@@ -191,19 +196,24 @@ docker run --rm -v /your/data:/data tapir \
 
 ---
 
-### Option C — pip only
+### Option C — pip
 
-> Installs the `tapir` command; external tools must be installed separately via conda.
+> Installs the `tapir` command and all Python dependencies. External bioinformatics tools (fastp, bowtie2, etc.) must be installed separately via conda.
 
 ```bash
-# From PyPI (recommended):
 pip install tapir-pipeline
+tapir --help
+```
 
-# Or from source:
-git clone https://github.com/LymF/TAPIR.git
-cd TAPIR
-pip install .
-tapir --version
+> **Note:** If using a conda environment with Python ≠ 3.11, install biopython via conda first to avoid compilation errors:
+> ```bash
+> conda install -c bioconda biopython -y
+> pip install tapir-pipeline
+> ```
+
+```bash
+# Or install from source:
+git clone https://github.com/LymF/TAPIR.git && cd TAPIR && pip install .
 ```
 
 ---
