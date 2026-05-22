@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="logo.jpg" alt="TAPIR logo" width="400"/>
+<img src="logo-fundo-negro.jpg" alt="TAPIR logo" width="400"/>
 
 **Transcriptome Assembly Pipeline for Identification of RNA viruses**
 
