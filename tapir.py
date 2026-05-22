@@ -211,11 +211,15 @@ def _run(
     t0 = time.perf_counter()
     if not isinstance(cmd, str):
         cmd = [str(c) for c in cmd]
+    elif shell:
+        # Ensure any failure inside a pipeline propagates the exit code.
+        cmd = "set -o pipefail; " + cmd
     result = subprocess.run(
         cmd,
         cwd=cwd,
         env={**os.environ, **(env or {})},
         shell=shell,
+        executable="/bin/bash" if shell else None,
     )
     elapsed = time.perf_counter() - t0
 
@@ -316,6 +320,17 @@ def _filter_by_length(
     return kept
 
 
+def _fastq_is_empty(path: Path) -> bool:
+    """Return True if a (possibly gzip-compressed) FASTQ has no reads."""
+    import gzip as _gzip
+    try:
+        opener = _gzip.open if path.suffix == ".gz" else open
+        with opener(path, "rt") as fh:
+            return fh.read(1) == ""
+    except (OSError, EOFError):
+        return True
+
+
 # ─── Input auto-detection ────────────────────────────────────────────────────
 
 def _find_read_pairs(
@@ -359,7 +374,7 @@ def _find_read_pairs(
 
     pairs: list[tuple[Path, Path]] = []
     for r1 in r1_files:
-        r2 = Path(str(r1).replace(r1_suffix, r2_suffix))
+        r2 = r1.parent / r1.name.replace(r1_suffix, r2_suffix)
         if r2.exists():
             pairs.append((r1, r2))
         else:
@@ -441,10 +456,48 @@ def step_fastp(
 
 # ─── Step 2: Host read removal ────────────────────────────────────────────────
 
+def build_host_index(
+    host_genome: Path,
+    out_dir: Path,
+    threads: int,
+) -> Path:
+    """
+    Build (or reuse) the Bowtie2 index for the host genome.
+
+    The index is shared across all samples and built only once per run.
+    A ``.done_host_index`` sentinel in ``out_dir`` prevents rebuilding on
+    resumed runs.
+
+    Parameters
+    ----------
+    host_genome : Path
+        Host reference genome FASTA.
+    out_dir : Path
+        Directory where the index files are stored.
+    threads : int
+        CPU threads for bowtie2-build.
+
+    Returns
+    -------
+    Path
+        Bowtie2 index prefix (pass directly to ``bowtie2 -x``).
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    idx      = out_dir / "host_idx"
+    idx_done = out_dir / ".done_host_index"
+    if not _checkpoint_exists(idx_done):
+        _run(
+            ["bowtie2-build", "--threads", threads, host_genome, idx],
+            step="bowtie2-build (host index)",
+        )
+        _mark_done(idx_done)
+    return idx
+
+
 def step_host_removal(
     r1: Path,
     r2: Path,
-    host_genome: Path,
+    host_idx: Path,
     out_dir: Path,
     threads: int,
     sample: str,
@@ -452,19 +505,20 @@ def step_host_removal(
     """
     Align reads to the host reference genome and retain only unmapped pairs.
 
-    Alignment is performed with Bowtie2 in ``--very-sensitive`` mode.  Both
-    reads of a pair must be unmapped (samtools flag ``-f 12``) to be retained,
-    ensuring that reads with even partial host homology are discarded.
+    Alignment is performed with Bowtie2 in ``--very-sensitive`` mode.
+    The SAM stream is piped through ``samtools view -f 12 -F 256`` to keep
+    only pairs where both mates are unmapped, then converted directly to
+    gzipped FASTQ — no temporary BAM or sort step required.
 
-    The Bowtie2 index is built once and re-used on resumed runs via an
-    independent checkpoint flag.
+    The Bowtie2 index is built once before the sample loop and shared across
+    all samples; this function receives the ready index prefix via ``host_idx``.
 
     Parameters
     ----------
     r1, r2 : Path
         Quality-trimmed paired-end reads.
-    host_genome : Path
-        Host genome FASTA file.
+    host_idx : Path
+        Bowtie2 index prefix (output of ``build_host_index``).
     out_dir : Path
         Output directory for non-host reads and alignment statistics.
     threads : int
@@ -478,50 +532,26 @@ def step_host_removal(
         Paths to non-host R1 and R2 FASTQ files (gzip-compressed).
     """
     out_dir.mkdir(parents=True, exist_ok=True)
-    done   = out_dir / ".done_host_removal"
+    done    = out_dir / ".done_host_removal"
     r1_out = out_dir / f"{sample}_nonhost_R1.fq.gz"
     r2_out = out_dir / f"{sample}_nonhost_R2.fq.gz"
-    idx    = out_dir / "host_idx"
-    bam_tmp = out_dir / f"{sample}_host_aligned.bam"
 
     if _checkpoint_exists(done):
         return r1_out, r2_out
 
-    # Build Bowtie2 index (only if not already built)
-    idx_done = out_dir / ".done_host_index"
-    if not _checkpoint_exists(idx_done):
-        _run(
-            ["bowtie2-build", "--threads", threads, host_genome, idx],
-            step="bowtie2-build (host index)",
-        )
-        _mark_done(idx_done)
-
-    # Align and extract unmapped pairs in a single piped command.
-    # samtools flags: -f 12  -> both reads unmapped
-    #                 -F 256 -> exclude non-primary alignments
+    # bowtie2 outputs all reads (no --no-unal); samtools view -f 12 -F 256
+    # keeps only pairs where both mates are unmapped; samtools fastq writes
+    # directly to gzipped paired FASTQs — no temp BAM or sort step needed
+    # because bowtie2 emits paired reads consecutively in the SAM stream.
     _run(
-        f"bowtie2 -p {threads} -x {idx} -1 {r1} -2 {r2} "
-        f"--no-unal --very-sensitive "
+        f"bowtie2 -p {threads} -x {host_idx} -1 {r1} -2 {r2} "
+        f"--very-sensitive "
         f"2> {out_dir / f'{sample}_host_align.log'} "
-        f"| samtools view -bS -f 12 -F 256 - "
-        f"| samtools sort -n -@ {threads} -o {bam_tmp}",
+        f"| samtools view -bS -f 12 -F 256 -@ {threads} - "
+        f"| samtools fastq -@ {threads} -1 {r1_out} -2 {r2_out} -0 /dev/null -s /dev/null -n -",
         step="bowtie2 (host removal)",
         shell=True,
     )
-
-    # Convert name-sorted BAM of unmapped pairs to paired FASTQ
-    _run([
-        "samtools", "fastq",
-        "-@", threads,
-        "-1", r1_out,
-        "-2", r2_out,
-        "-0", "/dev/null",   # orphan reads discarded
-        "-s", "/dev/null",   # singleton reads discarded
-        "-n",                # append /1 and /2 to read names
-        bam_tmp,
-    ], step="samtools fastq (non-host reads)")
-
-    bam_tmp.unlink(missing_ok=True)
     _mark_done(done)
     return r1_out, r2_out
 
@@ -736,6 +766,15 @@ def step_merge_assemblies(
     combined.unlink(missing_ok=True)
     log.info(f"  After length filter (>={min_length} bp): {n_kept:,} contigs")
 
+    if n_kept == 0:
+        log.warning(
+            f"  No contigs >= {min_length} bp in combined assembly. "
+            "Returning empty FASTA — downstream steps will be skipped."
+        )
+        merged.touch()
+        _mark_done(done)
+        return merged
+
     # ── MMseqs2 easy-linclust dereplication ───────────────────────────────────
     mmseqs_prefix = out_dir / f"{sample}_mmseqs"
     tmp_dir       = out_dir / "mmseqs_tmp"
@@ -746,12 +785,11 @@ def step_merge_assemblies(
         filtered,
         mmseqs_prefix,
         tmp_dir,
-        "--threads",       threads,
-        "--min-seq-id",    "0.95",   # 95% nucleotide identity
-        "-c",              "0.80",   # 80% coverage of shorter sequence
-        "--cov-mode",      "1",      # coverage of the shorter sequence
-        "--kmer-per-seq",  "80",
-        "--cluster-mode",  "2",      # greedy set cover
+        "--threads",      threads,
+        "--min-seq-id",   "0.95",   # 95% nucleotide identity
+        "-c",             "0.80",   # 80% coverage of shorter sequence
+        "--cov-mode",     "1",      # coverage of the shorter sequence
+        "--cluster-mode", "0",      # set cover (more stable than greedy=2)
     ], step="MMseqs2 linclust (dereplication)")
 
     rep_seqs = Path(f"{mmseqs_prefix}_rep_seq.fasta")
@@ -1006,9 +1044,9 @@ def step_cobra(
         if n_q == 0:
             log.warning(
                 "No contigs meet the COBRA query length threshold. "
-                "Consider lowering --cobra-min-len."
+                "Consider lowering --cobra-min-len. Skipping COBRA."
             )
-            # Return the unextended assembly as a fallback
+            _mark_done(done)
             return assembly
 
     _run([
@@ -1189,6 +1227,140 @@ def step_viralquest(
     return viral_fa
 
 
+# ─── Step 9: Cross-sample consolidation ─────────────────────────────────────
+
+def step_cross_sample_consolidation(
+    sample_data: list[tuple[str, Path, Path]],
+    out_dir: Path,
+    threads: int,
+    min_seq_id: float = 0.95,
+    min_cov: float = 0.95,
+) -> Path:
+    """
+    Consolidate assembly + COBRA outputs from all samples into a single
+    non-redundant FASTA for a single global ViralQuest annotation run.
+
+    For each sample, ``merged_fa`` (all assembled contigs, from step 5) and
+    ``cobra_fa`` (COBRA-extended contigs, from step 8) are combined so that no
+    contig is discarded regardless of COBRA outcome.  Each sequence header is
+    prefixed with ``SAMPLE|`` for downstream provenance tracking.
+
+    Cross-sample redundancy is then removed with MMseqs2 ``easy-linclust`` at
+    ``min_seq_id`` identity and ``min_cov`` coverage of the shorter sequence
+    (``--cov-mode 1``), so that viruses shared across libraries appear only once
+    in the input to ViralQuest.
+
+    Parameters
+    ----------
+    sample_data : list of (sample, merged_fa, cobra_fa)
+        Per-sample tuples produced by the main sample loop.
+    out_dir : Path
+        Output directory for this step.
+    threads : int
+        CPU threads for MMseqs2.
+    min_seq_id : float
+        Minimum nucleotide sequence identity for clustering  [default: 0.95].
+    min_cov : float
+        Minimum coverage of the shorter sequence  [default: 0.95].
+
+    Returns
+    -------
+    Path
+        Path to the consolidated, deduplicated FASTA ready for ViralQuest.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    done         = out_dir / ".done_cross_sample_consolidation"
+    consolidated = out_dir / "all_samples_consolidated.fa"
+
+    if _checkpoint_exists(done):
+        return consolidated
+
+    # ── Per-sample: merge merged_fa + cobra_fa, rename headers ───────────────
+    all_raw = out_dir / "all_samples_raw.fa"
+    total_seqs = 0
+
+    with open(all_raw, "w") as fout:
+        for sample, merged_fa, cobra_fa in sample_data:
+            seen: set[str] = set()
+            count = 0
+
+            for fa in [merged_fa, cobra_fa]:
+                if not fa.exists() or fa.stat().st_size == 0:
+                    continue
+                with open(fa) as fin:
+                    header: str | None = None
+                    seq_lines: list[str] = []
+                    for line in fin:
+                        if line.startswith(">"):
+                            if header is not None and header not in seen:
+                                fout.write(header + "\n")
+                                fout.writelines(seq_lines)
+                                seen.add(header)
+                                count += 1
+                            orig_id = line[1:].split()[0].strip()
+                            header  = f">{sample}|{orig_id}"
+                            seq_lines = []
+                        else:
+                            seq_lines.append(line)
+                    # flush last record
+                    if header is not None and header not in seen:
+                        fout.write(header + "\n")
+                        fout.writelines(seq_lines)
+                        seen.add(header)
+                        count += 1
+
+            log.info(f"  {sample}: {count:,} sequences (merged + COBRA) prepared")
+            total_seqs += count
+
+    log.info(f"  Total across all samples before dedup: {total_seqs:,} sequences")
+
+    if total_seqs == 0:
+        log.warning("No sequences to consolidate. Producing empty FASTA.")
+        all_raw.unlink(missing_ok=True)
+        consolidated.touch()
+        _mark_done(done)
+        return consolidated
+
+    # ── Cross-sample MMseqs2 dereplication ────────────────────────────────────
+    mmseqs_prefix = out_dir / "consolidated_mmseqs"
+    tmp_dir       = out_dir / "mmseqs_tmp"
+    tmp_dir.mkdir(exist_ok=True)
+
+    _run([
+        "mmseqs", "easy-linclust",
+        all_raw,
+        mmseqs_prefix,
+        tmp_dir,
+        "--threads",      threads,
+        "--min-seq-id",   str(min_seq_id),
+        "-c",             str(min_cov),
+        "--cov-mode",     "1",
+        "--cluster-mode", "2",
+    ], step="MMseqs2 linclust (cross-sample consolidation)")
+
+    rep_seqs = Path(f"{mmseqs_prefix}_rep_seq.fasta")
+    if not rep_seqs.exists():
+        log.error(
+            f"MMseqs2 representative FASTA not found: {rep_seqs}\n"
+            "Check MMseqs2 installation and version."
+        )
+        sys.exit(1)
+
+    shutil.copy(rep_seqs, consolidated)
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    all_raw.unlink(missing_ok=True)
+
+    n_out     = _count_sequences(consolidated)
+    n_removed = total_seqs - n_out
+    log.info(_c(GREEN + BOLD,
+        f"  Cross-sample consolidation: {n_out:,} representative sequences "
+        f"({n_removed:,} redundant removed from {len(sample_data)} sample(s))"
+    ))
+
+    _mark_done(done)
+    return consolidated
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # ARGUMENT PARSER
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1314,11 +1486,24 @@ def _build_parser() -> argparse.ArgumentParser:
         "--skip-steps",
         nargs="*",
         choices=["fastp","host","rnaspades","megahit",
-                 "merge","mapping","coverage","cobra","viralquest"],
+                 "merge","mapping","coverage","cobra",
+                 "cross_sample","viralquest"],
         default=[],
         metavar="STEP",
         help="Space-separated list of steps to skip. "
-             "Choices: fastp host rnaspades megahit merge mapping coverage cobra viralquest",
+             "Choices: fastp host rnaspades megahit merge mapping coverage cobra "
+             "cross_sample viralquest",
+    )
+
+    # Cross-sample consolidation parameters
+    cs = p.add_argument_group("Cross-sample consolidation (step 9)")
+    cs.add_argument(
+        "--cross-sample-id", type=float, default=0.95, metavar="FLOAT",
+        help="Min nucleotide identity for cross-sample MMseqs2 dereplication  [%(default)s]",
+    )
+    cs.add_argument(
+        "--cross-sample-cov", type=float, default=0.95, metavar="FLOAT",
+        help="Min coverage of the shorter sequence for cross-sample clustering  [%(default)s]",
     )
 
     return p
@@ -1332,41 +1517,20 @@ def step_collect_results(
     global_results_dir: Path,
 ) -> Path:
     """
-    Aggregate the most important outputs of a sample into a single flat
-    results directory shared across all samples.
+    Copy per-sample QC reports into the shared results directory.
 
-    After a full TAPIR run the per-sample output tree can span gigabytes of
-    intermediate files (BAMs, raw assembly FASTAs, MMseqs2 temporaries, etc.).
-    This step copies only the files a researcher typically needs for downstream
-    analysis and publication directly into ``global_results_dir/`` - flat,
-    with no per-sample subdirectory.  Because every output file already carries
-    the sample name as a prefix (e.g. ``sample1_viral.fa``) there is no risk of
-    name collision when results from multiple samples share the same folder.
-
-    Files collected
-    ---------------
-    From step 1 (fastp)
-      - ``<sample>_fastp.html``          - interactive QC report
-
-    From step 9 (ViralQuest)
-      - ``<sample>_viral.fa``            - final viral sequences (key deliverable)
-      - ``<sample>_viral-BLAST.csv``     - BLAST hit table for all viral contigs
-      - ``<sample>_bestSeqs.json``       - per-sequence annotation summary (JSON)
-      - ``<sample>_visualization.html``  - interactive annotation HTML report
-
-    Missing files are logged as warnings but do not abort the pipeline; the
-    function always completes so that results from other samples are still
-    collected.
+    ViralQuest now runs once on the consolidated multi-sample FASTA (step 10),
+    so only the fastp HTML report is collected here.  ViralQuest outputs are
+    collected separately after the global ViralQuest step.
 
     Parameters
     ----------
     sample : str
-        Sample identifier used to derive expected source file paths.
+        Sample identifier.
     sample_out_dir : Path
-        Root output directory for this sample (e.g. ``/results/sample1``).
+        Root output directory for this sample.
     global_results_dir : Path
-        Flat destination directory shared across all samples
-        (e.g. ``/results/final_results``).
+        Flat destination directory shared across all samples.
 
     Returns
     -------
@@ -1375,35 +1539,16 @@ def step_collect_results(
     """
     global_results_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── Define source -> destination pairs ────────────────────────────────────
-    # Files are written directly into global_results_dir (no subdirectory).
-    # All filenames already carry the sample prefix, so multiple samples can
-    # coexist in the same folder without collision.
-    vq_out = sample_out_dir / "09_viralquest" / f"OUTPUT_{sample}"
-
     targets: list[tuple[Path, str]] = [
-        # QC report
         (sample_out_dir / "01_fastp" / f"{sample}_fastp.html",
          f"{sample}_fastp.html"),
-        # Final viral sequences
-        (vq_out / f"{sample}_viral.fa",
-         f"{sample}_viral.fa"),
-        # BLAST result table
-        (vq_out / f"{sample}_viral-BLAST.csv",
-         f"{sample}_viral-BLAST.csv"),
-        # Per-sequence JSON annotation
-        (vq_out / f"{sample}_bestSeqs.json",
-         f"{sample}_bestSeqs.json"),
-        # Interactive HTML report
-        (vq_out / f"{sample}_visualization.html",
-         f"{sample}_visualization.html"),
     ]
 
     copied, missing_count = 0, 0
     for file_src, dst_name in targets:
         dst = global_results_dir / dst_name
         if file_src.exists():
-            shutil.copy2(file_src, dst)   # copy2 preserves metadata/timestamps
+            shutil.copy2(file_src, dst)
             log.debug(f"  Collected: {file_src.name} -> {dst}")
             copied += 1
         else:
@@ -1411,16 +1556,48 @@ def step_collect_results(
             missing_count += 1
 
     log.info(
-        _c(GREEN, f"  [OK]  Results collected for {sample}: "
+        _c(GREEN, f"  [OK]  QC results collected for {sample}: "
+                  f"{copied} file(s) -> {global_results_dir}")
+    )
+    return global_results_dir
+
+
+def _collect_global_viralquest_results(
+    vq_sample: str,
+    vq_out_dir: Path,
+    global_results_dir: Path,
+) -> None:
+    """Copy global ViralQuest outputs into the shared results directory."""
+    global_results_dir.mkdir(parents=True, exist_ok=True)
+    vq_output = vq_out_dir / f"OUTPUT_{vq_sample}"
+
+    targets: list[tuple[Path, str]] = [
+        (vq_output / f"{vq_sample}_viral.fa",            f"{vq_sample}_viral.fa"),
+        (vq_output / f"{vq_sample}_viral-BLAST.csv",     f"{vq_sample}_viral-BLAST.csv"),
+        (vq_output / f"{vq_sample}_bestSeqs.json",       f"{vq_sample}_bestSeqs.json"),
+        (vq_output / f"{vq_sample}_visualization.html",  f"{vq_sample}_visualization.html"),
+    ]
+
+    copied, missing_count = 0, 0
+    for file_src, dst_name in targets:
+        dst = global_results_dir / dst_name
+        if file_src.exists():
+            shutil.copy2(file_src, dst)
+            log.debug(f"  Collected: {file_src.name} -> {dst}")
+            copied += 1
+        else:
+            log.warning(f"  ViralQuest result not found, skipping: {file_src}")
+            missing_count += 1
+
+    log.info(
+        _c(GREEN, f"  [OK]  ViralQuest results collected: "
                   f"{copied} file(s) -> {global_results_dir}")
     )
     if missing_count:
         log.warning(
-            f"  {missing_count} expected file(s) were missing for {sample}. "
-            "Check the step logs above for errors."
+            f"  {missing_count} ViralQuest output file(s) missing. "
+            "Check the step 10 log for errors."
         )
-
-    return global_results_dir
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1432,19 +1609,22 @@ def main() -> None:
     Orchestrate the full TAPIR pipeline for all sample pairs in the input
     directory.
 
-    For each discovered R1/R2 pair:
-      1. Quality control   (fastp)
-      2. Host removal      (Bowtie2)
+    Per-sample steps (1–8):
+      1. Quality control           (fastp)
+      2. Host removal              (Bowtie2)
       3. rnaSPAdes assembly
       4. MEGAHIT assembly
-      5. Cross-assembly dereplication (MMseqs2)
-      6. Read mapping      (Bowtie2 + SAMtools)
-      7. Coverage          (CoverM)
-      8. Contig extension  (COBRA)
-      9. Viral annotation  (ViralQuest)
+      5. Cross-assembly dedup      (MMseqs2)
+      6. Read mapping              (Bowtie2 + SAMtools)
+      7. Coverage                  (CoverM / jgi)
+      8. Contig extension          (COBRA)
 
-    Each step writes a ``.done_*`` sentinel file on completion; re-running the
-    same command will skip completed steps automatically.
+    Global steps (after all samples):
+      9. Cross-sample consolidation (MMseqs2, header renaming)
+     10. Viral annotation           (ViralQuest — one run on consolidated FASTA)
+
+    Each step writes a ``.done_*`` sentinel file; re-running the same command
+    resumes from the last completed step automatically.
     """
     _banner()
     args = _build_parser().parse_args()
@@ -1455,10 +1635,6 @@ def main() -> None:
     global log
     log = _setup_logging(log_path)
 
-    # Directory that aggregates the key deliverables from every sample:
-    # fastp QC report, final viral FASTA, and ViralQuest annotation files.
-    # Intermediate files (BAMs, raw assemblies, MMseqs2 temps) remain in
-    # their respective step subdirectories for reproducibility and debugging.
     final_results_dir = args.output_dir / "final_results"
     final_results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1475,17 +1651,30 @@ def main() -> None:
         "spades.py", "megahit", "mmseqs",
         "cobra-meta", "viralquest",
     ]
-    if not args.skip_host_removal:
-        required_tools.append("bowtie2")
     _check_tools(required_tools)
+
+    # ── Build host index once (shared across all samples) ────────────────────
+    host_idx: Path | None = None
+    if not args.skip_host_removal and "host" not in args.skip_steps:
+        if not args.host_genome:
+            log.error("--host-genome is required unless --skip-host-removal is set.")
+            sys.exit(1)
+        host_idx = build_host_index(
+            host_genome=args.host_genome,
+            out_dir=args.output_dir / "host_index",
+            threads=args.threads,
+        )
 
     # ── Discover sample pairs ─────────────────────────────────────────────────
     pairs = _find_read_pairs(args.input_dir, args.r1_suffix, args.r2_suffix)
     log.info(f"  Samples detected : {len(pairs)}")
 
-    # ── Process each sample ───────────────────────────────────────────────────
+    # ── Per-sample loop (steps 1–8) ───────────────────────────────────────────
+    # sample_data collects (sample, merged_fa, cobra_fa) for cross-sample step.
+    sample_data: list[tuple[str, Path, Path]] = []
+
     for r1_raw, r2_raw in pairs:
-        sample = r1_raw.name.replace(args.r1_suffix, "")
+        sample = r1_raw.name.replace(args.r1_suffix, "").rstrip("_")
         s_out  = args.output_dir / sample
 
         log.info("")
@@ -1507,18 +1696,19 @@ def main() -> None:
 
         # Step 2 - Host removal
         if not args.skip_host_removal and "host" not in args.skip_steps:
-            if not args.host_genome:
-                log.error(
-                    "--host-genome is required unless --skip-host-removal is set."
-                )
-                sys.exit(1)
             r1_nh, r2_nh = step_host_removal(
                 r1_qc, r2_qc,
-                host_genome=args.host_genome,
+                host_idx=host_idx,
                 out_dir=s_out / "02_host_removal",
                 threads=args.threads,
                 sample=sample,
             )
+            if _fastq_is_empty(r1_nh):
+                log.warning(
+                    f"  [SKIP]  {sample}: 0 non-host reads after host removal "
+                    "(100% host?). Skipping assembly steps."
+                )
+                continue
         else:
             r1_nh, r2_nh = r1_qc, r2_qc
             log.info(">>  Host removal skipped")
@@ -1565,6 +1755,13 @@ def main() -> None:
             merged_fa = s_out / "05_merge" / f"{sample}_merged_nr.fa"
             log.info(">>  Assembly merge skipped")
 
+        if not merged_fa.exists() or merged_fa.stat().st_size == 0:
+            log.warning(
+                f"  [SKIP]  {sample}: merged assembly is empty. "
+                "Skipping mapping and COBRA."
+            )
+            continue
+
         # Step 6 - Read mapping
         if "mapping" not in args.skip_steps:
             bam = step_map_reads(
@@ -1608,29 +1805,7 @@ def main() -> None:
             cobra_fa = s_out / "08_cobra" / "COBRA_extended_all.fa"
             log.info(">>  COBRA skipped")
 
-        # Step 9 - ViralQuest
-        if "viralquest" not in args.skip_steps:
-            viral_fa = step_viralquest(
-                contigs=cobra_fa,
-                out_dir=s_out / "09_viralquest",
-                threads=args.threads,
-                email=args.email,
-                sample=sample,
-                nr_dmnd=args.nr_dmnd,
-                viral_dmnd=args.viral_dmnd,
-                rvdb_hmm=args.rvdb_hmm,
-                eggnog_hmm=args.eggnog_hmm,
-                vfam_hmm=args.vfam_hmm,
-                pfam_hmm=args.pfam_hmm,
-                llm_type=args.llm_type,
-                llm_model=args.llm_model,
-                llm_api_key=args.llm_api_key,
-            )
-        else:
-            viral_fa = s_out / "09_viralquest" / f"OUTPUT_{sample}" / f"{sample}_viral.fa"
-            log.info(">>  ViralQuest skipped")
-
-        # ── Step 10: Collect key results into final_results/ ─────────────────
+        # Collect per-sample QC report into final_results/
         step_collect_results(
             sample=sample,
             sample_out_dir=s_out,
@@ -1639,15 +1814,77 @@ def main() -> None:
 
         # ── Per-sample summary ────────────────────────────────────────────────
         log.info("")
-        log.info(_c(GREEN + BOLD, f"  [OK]  {sample} - all steps complete"))
-        log.info(f"    Merged assembly  : {merged_fa}")
-        log.info(f"    COBRA extended   : {cobra_fa}")
-        if viral_fa.exists():
-            log.info(
-                f"    Viral sequences  : {viral_fa} "
-                f"({_count_sequences(viral_fa):,} sequences)"
+        log.info(_c(GREEN + BOLD, f"  [OK]  {sample} - per-sample steps complete"))
+        log.info(f"    Merged assembly : {merged_fa}")
+        log.info(f"    COBRA extended  : {cobra_fa}")
+
+        sample_data.append((sample, merged_fa, cobra_fa))
+
+    # ── Step 9: Cross-sample consolidation ───────────────────────────────────
+    log.info("")
+    log.info(_c(BOLD + CYAN, f"{'━'*58}"))
+    log.info(_c(BOLD + CYAN, "  Step 9: Cross-sample consolidation"))
+    log.info(_c(BOLD + CYAN, f"{'━'*58}"))
+
+    if not sample_data:
+        log.warning("No samples produced usable assemblies. Skipping steps 9–10.")
+    else:
+        if "cross_sample" not in args.skip_steps:
+            consolidated_fa = step_cross_sample_consolidation(
+                sample_data=sample_data,
+                out_dir=args.output_dir / "09_cross_sample",
+                threads=args.threads,
+                min_seq_id=args.cross_sample_id,
+                min_cov=args.cross_sample_cov,
             )
-        log.info(f"    Final results    : {final_results_dir}")
+        else:
+            consolidated_fa = args.output_dir / "09_cross_sample" / "all_samples_consolidated.fa"
+            log.info(">>  Cross-sample consolidation skipped by user (--skip-steps cross_sample)")
+
+        # ── Step 10: ViralQuest (global) ─────────────────────────────────────
+        log.info("")
+        log.info(_c(BOLD + CYAN, f"{'━'*58}"))
+        log.info(_c(BOLD + CYAN, "  Step 10: ViralQuest (global)"))
+        log.info(_c(BOLD + CYAN, f"{'━'*58}"))
+
+        vq_sample = "all_samples"
+        vq_out_dir = args.output_dir / "10_viralquest"
+
+        if "viralquest" not in args.skip_steps:
+            if not consolidated_fa.exists() or consolidated_fa.stat().st_size == 0:
+                log.warning(
+                    "Consolidated FASTA is empty or missing — skipping ViralQuest."
+                )
+            else:
+                viral_fa = step_viralquest(
+                    contigs=consolidated_fa,
+                    out_dir=vq_out_dir,
+                    threads=args.threads,
+                    email=args.email,
+                    sample=vq_sample,
+                    nr_dmnd=args.nr_dmnd,
+                    viral_dmnd=args.viral_dmnd,
+                    rvdb_hmm=args.rvdb_hmm,
+                    eggnog_hmm=args.eggnog_hmm,
+                    vfam_hmm=args.vfam_hmm,
+                    pfam_hmm=args.pfam_hmm,
+                    llm_type=args.llm_type,
+                    llm_model=args.llm_model,
+                    llm_api_key=args.llm_api_key,
+                )
+                _collect_global_viralquest_results(
+                    vq_sample=vq_sample,
+                    vq_out_dir=vq_out_dir,
+                    global_results_dir=final_results_dir,
+                )
+                log.info(f"    Consolidated FASTA : {consolidated_fa}")
+                if viral_fa.exists():
+                    log.info(
+                        f"    Viral sequences    : {viral_fa} "
+                        f"({_count_sequences(viral_fa):,} sequences)"
+                    )
+        else:
+            log.info(">>  ViralQuest skipped by user (--skip-steps viralquest)")
 
     # ── Pipeline summary ──────────────────────────────────────────────────────
     log.info("")
