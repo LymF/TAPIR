@@ -11,7 +11,7 @@
 ║      ╚═╝   ╚═╝  ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝                                      ║
 ║                                                                              ║
 ║   Transcriptome Assembly Pipeline for Identification of RNA viruses         ║
-║   Version 0.1.0                                                              ║
+║   Version 1.0.0                                                              ║
 ║                                                                              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
@@ -29,24 +29,24 @@ TAPIR deliberately combines two complementary assemblers:
   • MEGAHIT    
 
 Contigs from both assemblers are pooled and dereplicated with MMseqs2
-easy-linclust (≥95% nucleotide identity, ≥80% coverage of the shorter sequence)
+easy-linclust (>=95% nucleotide identity, >=80% coverage of the shorter sequence)
 to yield a non-redundant representative set. This dual-assembly approach
-recovers ~15–30% more unique contigs than any single assembler alone.
+recovers ~15-30% more unique contigs than any single assembler alone.
 
 
 
 Pipeline steps
 --------------
-  1.  fastp          — Adapter trimming, quality filtering, PE error correction
-  2.  Bowtie2        — Host genome alignment; retain only unmapped read pairs
-  3.  rnaSPAdes      — RNA-aware de novo assembly
-  4.  MEGAHIT        — Complementary de novo assembly (meta-sensitive)
-  5.  MMseqs2        — Cross-assembly dereplication at 95% ANI
-  6.  Bowtie2 + SAM  — Map cleaned reads back to merged assembly
-  7.  CoverM         — Per-contig mean coverage estimation
-  8.  COBRA          — Contig Overlap Based Re-Assembly for genome extension
-  9.  ViralQuest     — BLAST + HMM + optional LLM-assisted viral annotation
-  10. Collect results — QC reports, viral FASTAs, and annotation files aggregated into `final_results/`
+  1.  fastp          - Adapter trimming, quality filtering, PE error correction
+  2.  Bowtie2        - Host genome alignment; retain only unmapped read pairs
+  3.  rnaSPAdes      - RNA-aware de novo assembly
+  4.  MEGAHIT        - Complementary de novo assembly (meta-sensitive)
+  5.  MMseqs2        - Cross-assembly dereplication at 95% ANI
+  6.  Bowtie2 + SAM  - Map cleaned reads back to merged assembly
+  7.  CoverM         - Per-contig mean coverage estimation
+  8.  COBRA          - Contig Overlap Based Re-Assembly for genome extension
+  9.  ViralQuest     - BLAST + HMM + optional LLM-assisted viral annotation
+  10. Collect results - QC reports, viral FASTAs, and annotation files aggregated into `final_results/`
 
 Dependencies (see README for version requirements)
 ---------------------------------------------------
@@ -84,7 +84,7 @@ except ImportError:
     )
 
 # ─── Version ──────────────────────────────────────────────────────────────────
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 __author__  = "TAPIR developers"
 
 # ─── ANSI terminal colours ────────────────────────────────────────────────────
@@ -209,6 +209,8 @@ def _run(
     log.debug(f"  cwd={cwd}  shell={shell}")
 
     t0 = time.perf_counter()
+    if not isinstance(cmd, str):
+        cmd = [str(c) for c in cmd]
     result = subprocess.run(
         cmd,
         cwd=cwd,
@@ -219,12 +221,12 @@ def _run(
 
     if result.returncode != 0:
         log.error(
-            _c(RED, f"✗  [{step}] exited with code {result.returncode} "
+            _c(RED, f"[FAIL]  [{step}] exited with code {result.returncode} "
                     f"after {elapsed:.1f}s")
         )
         sys.exit(result.returncode)
 
-    log.info(_c(GREEN, f"✓  [{step}] completed in {elapsed:.1f}s"))
+    log.info(_c(GREEN, f"[OK]  [{step}] completed in {elapsed:.1f}s"))
 
 
 # ─── Checkpoint helpers ───────────────────────────────────────────────────────
@@ -239,7 +241,7 @@ def _checkpoint_exists(flag: Path) -> bool:
     and emits a skip notice to the log.
     """
     if flag.exists():
-        log.info(_c(YELLOW, f"⏩  Checkpoint found — skipping: {flag.name}"))
+        log.info(_c(YELLOW, f">>  Checkpoint found - skipping: {flag.name}"))
         return True
     return False
 
@@ -269,7 +271,7 @@ def _check_tools(tools: list[str]) -> None:
     if missing:
         log.error(
             _c(RED, "Missing required tools: " + ", ".join(missing)) + "\n"
-            "Please install all dependencies — see README for instructions."
+            "Please install all dependencies - see README for instructions."
         )
         sys.exit(1)
     log.info(_c(GREEN, f"All {len(tools)} required tools found."))
@@ -289,7 +291,7 @@ def _filter_by_length(
     min_length: int,
 ) -> int:
     """
-    Write only sequences with length ≥ ``min_length`` to ``output_fasta``.
+    Write only sequences with length >= ``min_length`` to ``output_fasta``.
 
     Parameters
     ----------
@@ -361,7 +363,7 @@ def _find_read_pairs(
         if r2.exists():
             pairs.append((r1, r2))
         else:
-            log.warning(f"R2 file not found for {r1.name} — pair skipped.")
+            log.warning(f"R2 file not found for {r1.name} - pair skipped.")
 
     if not pairs:
         log.error("No complete read pairs found. Aborting.")
@@ -495,8 +497,8 @@ def step_host_removal(
         _mark_done(idx_done)
 
     # Align and extract unmapped pairs in a single piped command.
-    # samtools flags: -f 12  → both reads unmapped
-    #                 -F 256 → exclude non-primary alignments
+    # samtools flags: -f 12  -> both reads unmapped
+    #                 -F 256 -> exclude non-primary alignments
     _run(
         f"bowtie2 -p {threads} -x {idx} -1 {r1} -2 {r2} "
         f"--no-unal --very-sensitive "
@@ -593,7 +595,7 @@ def step_rnaspades(
             sys.exit(1)
 
     n = _count_sequences(transcripts)
-    log.info(f"  rnaSPAdes → {n:,} assembled transcripts")
+    log.info(f"  rnaSPAdes -> {n:,} assembled transcripts")
     _mark_done(done)
     return transcripts
 
@@ -607,6 +609,9 @@ def step_megahit(
     threads: int,
     ram_gb: int,
     sample: str,
+    min_contig_len: int = 500,
+    mink: int = 21,
+    maxk: int = 141,
 ) -> Path:
     """
     Assemble reads with MEGAHIT using the ``meta-sensitive`` preset.
@@ -646,12 +651,13 @@ def step_megahit(
         "-t", threads,
         "--memory",         f"{ram_gb}e9",
         "--presets",        "meta-sensitive",
-        "--min-contig-len", "500",
-        "--k-list",         "21,29,39,59,79,99,119,141",
+        "--min-contig-len", min_contig_len,
+        "--k-min",          mink,
+        "--k-max",          maxk,
     ], step="MEGAHIT")
 
     n = _count_sequences(contigs)
-    log.info(f"  MEGAHIT → {n:,} assembled contigs")
+    log.info(f"  MEGAHIT -> {n:,} assembled contigs")
     _mark_done(done)
     return contigs
 
@@ -721,14 +727,14 @@ def step_merge_assemblies(
                     else:
                         fout.write(line)
     log.info(
-        f"  Combined {len(contigs_list)} assembly files → {_count_sequences(combined):,} total contigs"
+        f"  Combined {len(contigs_list)} assembly files -> {_count_sequences(combined):,} total contigs"
     )
 
     # ── Length filter ─────────────────────────────────────────────────────────
     filtered = out_dir / f"{sample}_combined_min{min_length}bp.fa"
     n_kept = _filter_by_length(combined, filtered, min_length)
     combined.unlink(missing_ok=True)
-    log.info(f"  After length filter (≥{min_length} bp): {n_kept:,} contigs")
+    log.info(f"  After length filter (>={min_length} bp): {n_kept:,} contigs")
 
     # ── MMseqs2 easy-linclust dereplication ───────────────────────────────────
     mmseqs_prefix = out_dir / f"{sample}_mmseqs"
@@ -824,7 +830,7 @@ def step_map_reads(
         f"--no-discordant --no-mixed "
         f"2> {out_dir / f'{sample}_map_back.log'} "
         f"| samtools sort -@ {threads} -o {bam_out}",
-        step="bowtie2 (reads → assembly)",
+        step="bowtie2 (reads -> assembly)",
         shell=True,
     )
 
@@ -889,7 +895,7 @@ def step_coverage(
             "--output-file", cov_raw,
         ], step="CoverM")
 
-        # CoverM header: "Contig\tMean" — drop header, keep columns 1 & 2
+        # CoverM header: "Contig\tMean" - drop header, keep columns 1 & 2
         with open(cov_raw) as fin, open(cov_file, "w") as fout:
             next(fin)  # skip header
             for line in fin:
@@ -949,7 +955,7 @@ def step_cobra(
     Assembler hint rationale for merged assemblies
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     TAPIR uses ``megahit`` as the default hint because:
-      - Both assemblers use compatible k-mer ranges (21–141)
+      - Both assemblers use compatible k-mer ranges (21-141)
       - MEGAHIT's ``maxK`` is 141, giving an overlap of 141 bp
       - Using ``megahit`` is the more conservative choice when contigs
         from both assemblers are present in the same FASTA
@@ -995,7 +1001,7 @@ def step_cobra(
         query = out_dir / "cobra_query_auto.fa"
         n_q = _filter_by_length(assembly, query, cobra_min_length)
         log.info(
-            f"  Auto-query: {n_q:,} contigs ≥ {cobra_min_length} bp selected for COBRA"
+            f"  Auto-query: {n_q:,} contigs >= {cobra_min_length} bp selected for COBRA"
         )
         if n_q == 0:
             log.warning(
@@ -1193,7 +1199,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="tapir",
         description=(
-            "TAPIR — Transcriptome Assembly Pipeline for Identification of RNA viruses\n"
+            "TAPIR - Transcriptome Assembly Pipeline for Identification of RNA viruses\n"
             "End-to-end viral discovery from paired-end metatranscriptomics data."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1217,7 +1223,7 @@ def _build_parser() -> argparse.ArgumentParser:
         --llm-api-key $GEMINI_KEY
 
 ━━━ Resume an interrupted run ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Re-run the same command — checkpoints are automatic.
+  Re-run the same command - checkpoints are automatic.
 
 ━━━ Skip specific steps ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   tapir ... --skip-steps fastp host
@@ -1265,7 +1271,7 @@ def _build_parser() -> argparse.ArgumentParser:
     cb = p.add_argument_group("COBRA (contig extension)")
     cb.add_argument("--cobra-query", type=Path, metavar="FASTA",
                     help="Custom query FASTA for COBRA. If omitted, all contigs "
-                         "≥ --cobra-min-len are used automatically.")
+                         ">= --cobra-min-len are used automatically.")
     cb.add_argument("--cobra-min-len", type=int, default=2000, metavar="BP",
                     help="Minimum contig length for automatic COBRA query "
                          "selection  [%(default)s]")
@@ -1332,7 +1338,7 @@ def step_collect_results(
     After a full TAPIR run the per-sample output tree can span gigabytes of
     intermediate files (BAMs, raw assembly FASTAs, MMseqs2 temporaries, etc.).
     This step copies only the files a researcher typically needs for downstream
-    analysis and publication directly into ``global_results_dir/`` — flat,
+    analysis and publication directly into ``global_results_dir/`` - flat,
     with no per-sample subdirectory.  Because every output file already carries
     the sample name as a prefix (e.g. ``sample1_viral.fa``) there is no risk of
     name collision when results from multiple samples share the same folder.
@@ -1340,13 +1346,13 @@ def step_collect_results(
     Files collected
     ---------------
     From step 1 (fastp)
-      - ``<sample>_fastp.html``          — interactive QC report
+      - ``<sample>_fastp.html``          - interactive QC report
 
     From step 9 (ViralQuest)
-      - ``<sample>_viral.fa``            — final viral sequences (key deliverable)
-      - ``<sample>_viral-BLAST.csv``     — BLAST hit table for all viral contigs
-      - ``<sample>_bestSeqs.json``       — per-sequence annotation summary (JSON)
-      - ``<sample>_visualization.html``  — interactive annotation HTML report
+      - ``<sample>_viral.fa``            - final viral sequences (key deliverable)
+      - ``<sample>_viral-BLAST.csv``     - BLAST hit table for all viral contigs
+      - ``<sample>_bestSeqs.json``       - per-sequence annotation summary (JSON)
+      - ``<sample>_visualization.html``  - interactive annotation HTML report
 
     Missing files are logged as warnings but do not abort the pipeline; the
     function always completes so that results from other samples are still
@@ -1369,7 +1375,7 @@ def step_collect_results(
     """
     global_results_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── Define source → destination pairs ────────────────────────────────────
+    # ── Define source -> destination pairs ────────────────────────────────────
     # Files are written directly into global_results_dir (no subdirectory).
     # All filenames already carry the sample prefix, so multiple samples can
     # coexist in the same folder without collision.
@@ -1398,15 +1404,15 @@ def step_collect_results(
         dst = global_results_dir / dst_name
         if file_src.exists():
             shutil.copy2(file_src, dst)   # copy2 preserves metadata/timestamps
-            log.debug(f"  Collected: {file_src.name} → {dst}")
+            log.debug(f"  Collected: {file_src.name} -> {dst}")
             copied += 1
         else:
             log.warning(f"  Result file not found, skipping: {file_src}")
             missing_count += 1
 
     log.info(
-        _c(GREEN, f"  ✓  Results collected for {sample}: "
-                  f"{copied} file(s) → {global_results_dir}")
+        _c(GREEN, f"  [OK]  Results collected for {sample}: "
+                  f"{copied} file(s) -> {global_results_dir}")
     )
     if missing_count:
         log.warning(
@@ -1456,7 +1462,7 @@ def main() -> None:
     final_results_dir = args.output_dir / "final_results"
     final_results_dir.mkdir(parents=True, exist_ok=True)
 
-    log.info(f"TAPIR v{__version__} — pipeline started")
+    log.info(f"TAPIR v{__version__} - pipeline started")
     log.info(f"  Output directory : {args.output_dir}")
     log.info(f"  Final results    : {final_results_dir}")
     log.info(f"  Threads          : {args.threads}")
@@ -1487,7 +1493,7 @@ def main() -> None:
         log.info(_c(BOLD + MAGENTA, f"  Sample: {sample}"))
         log.info(_c(BOLD + MAGENTA, f"{'━'*58}"))
 
-        # Step 1 — fastp
+        # Step 1 - fastp
         if "fastp" not in args.skip_steps:
             r1_qc, r2_qc = step_fastp(
                 r1_raw, r2_raw,
@@ -1497,9 +1503,9 @@ def main() -> None:
             )
         else:
             r1_qc, r2_qc = r1_raw, r2_raw
-            log.info("⏩  fastp skipped by user (--skip-steps fastp)")
+            log.info(">>  fastp skipped by user (--skip-steps fastp)")
 
-        # Step 2 — Host removal
+        # Step 2 - Host removal
         if not args.skip_host_removal and "host" not in args.skip_steps:
             if not args.host_genome:
                 log.error(
@@ -1515,9 +1521,9 @@ def main() -> None:
             )
         else:
             r1_nh, r2_nh = r1_qc, r2_qc
-            log.info("⏩  Host removal skipped")
+            log.info(">>  Host removal skipped")
 
-        # Step 3 — rnaSPAdes
+        # Step 3 - rnaSPAdes
         if "rnaspades" not in args.skip_steps:
             rnaspades_fa = step_rnaspades(
                 r1_nh, r2_nh,
@@ -1528,9 +1534,9 @@ def main() -> None:
             )
         else:
             rnaspades_fa = s_out / "03_rnaspades" / "transcripts.fasta"
-            log.info("⏩  rnaSPAdes skipped")
+            log.info(">>  rnaSPAdes skipped")
 
-        # Step 4 — MEGAHIT
+        # Step 4 - MEGAHIT
         if "megahit" not in args.skip_steps:
             megahit_fa = step_megahit(
                 r1_nh, r2_nh,
@@ -1538,12 +1544,15 @@ def main() -> None:
                 threads=args.threads,
                 ram_gb=args.ram,
                 sample=sample,
+                min_contig_len=args.min_contig_len,
+                mink=args.mink,
+                maxk=args.maxk,
             )
         else:
             megahit_fa = s_out / "04_megahit" / "final.contigs.fa"
-            log.info("⏩  MEGAHIT skipped")
+            log.info(">>  MEGAHIT skipped")
 
-        # Step 5 — Cross-assembly dereplication
+        # Step 5 - Cross-assembly dereplication
         if "merge" not in args.skip_steps:
             merged_fa = step_merge_assemblies(
                 contigs_list=[rnaspades_fa, megahit_fa],
@@ -1554,9 +1563,9 @@ def main() -> None:
             )
         else:
             merged_fa = s_out / "05_merge" / f"{sample}_merged_nr.fa"
-            log.info("⏩  Assembly merge skipped")
+            log.info(">>  Assembly merge skipped")
 
-        # Step 6 — Read mapping
+        # Step 6 - Read mapping
         if "mapping" not in args.skip_steps:
             bam = step_map_reads(
                 r1_nh, r2_nh,
@@ -1567,9 +1576,9 @@ def main() -> None:
             )
         else:
             bam = s_out / "06_mapping" / f"{sample}.sorted.bam"
-            log.info("⏩  Read mapping skipped")
+            log.info(">>  Read mapping skipped")
 
-        # Step 7 — Coverage
+        # Step 7 - Coverage
         if "coverage" not in args.skip_steps:
             coverage = step_coverage(
                 bam=bam,
@@ -1579,13 +1588,13 @@ def main() -> None:
             )
         else:
             coverage = s_out / "07_coverage" / f"{sample}_coverage.tsv"
-            log.info("⏩  Coverage estimation skipped")
+            log.info(">>  Coverage estimation skipped")
 
-        # Step 8 — COBRA extension
+        # Step 8 - COBRA extension
         if "cobra" not in args.skip_steps:
             cobra_fa = step_cobra(
                 assembly=merged_fa,
-                query=args.cobra_query if hasattr(args, "cobra_query") else None,
+                query=args.cobra_query,
                 coverage=coverage,
                 bam=bam,
                 out_dir=s_out / "08_cobra",
@@ -1597,9 +1606,9 @@ def main() -> None:
             )
         else:
             cobra_fa = s_out / "08_cobra" / "COBRA_extended_all.fa"
-            log.info("⏩  COBRA skipped")
+            log.info(">>  COBRA skipped")
 
-        # Step 9 — ViralQuest
+        # Step 9 - ViralQuest
         if "viralquest" not in args.skip_steps:
             viral_fa = step_viralquest(
                 contigs=cobra_fa,
@@ -1615,11 +1624,11 @@ def main() -> None:
                 pfam_hmm=args.pfam_hmm,
                 llm_type=args.llm_type,
                 llm_model=args.llm_model,
-                llm_api_key=getattr(args, "llm_api_key", None),
+                llm_api_key=args.llm_api_key,
             )
         else:
             viral_fa = s_out / "09_viralquest" / f"OUTPUT_{sample}" / f"{sample}_viral.fa"
-            log.info("⏩  ViralQuest skipped")
+            log.info(">>  ViralQuest skipped")
 
         # ── Step 10: Collect key results into final_results/ ─────────────────
         step_collect_results(
@@ -1630,7 +1639,7 @@ def main() -> None:
 
         # ── Per-sample summary ────────────────────────────────────────────────
         log.info("")
-        log.info(_c(GREEN + BOLD, f"  ✓  {sample} — all steps complete"))
+        log.info(_c(GREEN + BOLD, f"  [OK]  {sample} - all steps complete"))
         log.info(f"    Merged assembly  : {merged_fa}")
         log.info(f"    COBRA extended   : {cobra_fa}")
         if viral_fa.exists():
@@ -1643,7 +1652,7 @@ def main() -> None:
     # ── Pipeline summary ──────────────────────────────────────────────────────
     log.info("")
     log.info(_c(BOLD + CYAN, "═" * 58))
-    log.info(_c(BOLD + CYAN, f"  TAPIR v{__version__} — pipeline finished"))
+    log.info(_c(BOLD + CYAN, f"  TAPIR v{__version__} - pipeline finished"))
     log.info(_c(BOLD + CYAN, f"  {len(pairs)} sample(s) processed"))
     log.info(_c(BOLD + CYAN, "═" * 58))
     log.info(f"  Full log      : {log_path}")
