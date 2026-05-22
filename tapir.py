@@ -1403,7 +1403,7 @@ def step_cross_sample_consolidation(
         "--min-seq-id",   str(min_seq_id),
         "-c",             str(min_cov),
         "--cov-mode",     "1",
-        "--cluster-mode", "2",
+        "--cluster-mode", "0",      # set cover (greedy=2 has off-by-one bug in parallel)
     ], step="MMseqs2 linclust (cross-sample consolidation)")
 
     rep_seqs = Path(f"{mmseqs_prefix}_rep_seq.fasta")
