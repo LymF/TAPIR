@@ -76,23 +76,6 @@ Raw paired-end reads (RNA-seq)
                   └─────────────┘
 ```
 
----
-
-## Assembly strategy
-
-TAPIR combines two complementary assemblers rather than relying on a single tool:
-
-| Assembler | Role | Why |
-|---|---|---|
-| **rnaSPAdes** | Primary | RNA-aware de Bruijn graph; handles extreme coverage variation native to transcriptomics; optimised for RNA isoforms |
-| **MEGAHIT** | Complementary | Memory-efficient; `meta-sensitive` preset recovers contigs from low-coverage regions that rnaSPAdes may fragment |
-
-Contigs from both assemblers are pooled and dereplicated with **MMseqs2 easy-linclust** (≥95% nucleotide identity, ≥80% coverage of the shorter sequence). This strategy recovers approximately **15–30% more unique contigs** compared to using either assembler alone.
-
-> **Why not metaviralSPAdes?**
-> metaviralSPAdes is optimised for DNA metagenomic data and performs poorly with the variable-coverage, RNA-derived reads typical of metatranscriptomics. TAPIR intentionally excludes it.
-
----
 
 ## Requirements
 
@@ -135,7 +118,7 @@ Contigs from both assemblers are pooled and dereplicated with **MMseqs2 easy-lin
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/[username]/tapir.git
+git clone https://github.com/LymF/tapir.git
 cd tapir
 ```
 
@@ -426,7 +409,7 @@ If you use TAPIR in your research, please cite this repository and the tools it 
 > Chen, L., Banfield, J.F. COBRA improves the completeness and contiguity of viral genomes assembled from metagenomes. *Nat Microbiol* (2024). https://doi.org/10.1038/s41564-023-01598-2
 
 **ViralQuest**
-> [citation pending — see https://github.com/gabrielvpina/viralquest]
+> Rodrigues, G.V.P., Ferreira, L.Y.M. & Aguiar, E.R.G.R. ViralQuest: a user-friendly interactive pipeline for viral-sequences analysis and curation. BMC Bioinformatics 27, 64 (2026). https://doi.org/10.1186/s12859-026-06391-6 — see https://github.com/gabrielvpina/viralquest
 
 **SPAdes / rnaSPAdes**
 > Prjibelski A. et al. Using SPAdes de novo assembler. *Curr Protoc Bioinformatics* (2020). https://doi.org/10.1002/cpbi.102
@@ -459,6 +442,6 @@ TAPIR is released under the [MIT License](LICENSE).
 
 ## Contact
 
-For bug reports and feature requests, please use the [GitHub Issues](https://github.com/[username]/tapir/issues) page.
+For bug reports and feature requests, please use the [GitHub Issues](https://github.com/LymF/tapir/issues) page.
 
-For general questions, contact: `[your@email.edu]`
+For general questions, contact: `lucasmelobiomed@gmail.com`
