@@ -73,7 +73,12 @@ Raw paired-end reads (RNA-seq)
                          ▼
                   ┌─────────────┐
                   │ 9.ViralQuest│  BLAST · HMM · LLM annotation
-                  └─────────────┘
+                  └──────┬──────┘
+                         │
+                         ▼
+               ┌──────────────────┐
+               │ 10. final_results│  QC · viral FASTA · annotation reports
+               └──────────────────┘
 ```
 
 
@@ -336,13 +341,39 @@ python tapir.py ... \
 
 ## Output structure
 
+At the end of the run TAPIR produces two distinct output areas:
+
+- **Per-sample directories** — full intermediate and final outputs organised by step, kept for reproducibility and debugging.
+- **`final_results/`** — a single flat directory containing only the key deliverables from all samples, named by sample so they coexist without conflict. This is the first place to look after the pipeline finishes.
+
+### `final_results/` — key deliverables (flat, all samples together)
+
 ```
 results/
+└── final_results/
+    ├── sample1_fastp.html              ← QC report
+    ├── sample1_viral.fa                ← final viral sequences ✓
+    ├── sample1_viral-BLAST.csv         ← BLAST hit table
+    ├── sample1_bestSeqs.json           ← per-sequence annotation (JSON)
+    ├── sample1_visualization.html      ← interactive annotation report ✓
+    ├── sample2_fastp.html
+    ├── sample2_viral.fa
+    ├── sample2_viral-BLAST.csv
+    ├── sample2_bestSeqs.json
+    └── sample2_visualization.html
+```
+
+### Full per-sample output tree
+
+```
+results/
+├── tapir.log                           ← full pipeline log
+├── final_results/                      ← see above
 └── sample1/
     ├── 01_fastp/
     │   ├── sample1_R1.fastp.fq.gz
     │   ├── sample1_R2.fastp.fq.gz
-    │   └── sample1_fastp.html          ← interactive QC report
+    │   └── sample1_fastp.html
     ├── 02_host_removal/
     │   ├── sample1_nonhost_R1.fq.gz
     │   ├── sample1_nonhost_R2.fq.gz
@@ -367,11 +398,10 @@ results/
     │   └── COBRA_joining_status.tsv
     └── 09_viralquest/
         └── OUTPUT_sample1/
-            ├── sample1_viral.fa         ← final viral sequences ✓
+            ├── sample1_viral.fa
             ├── sample1_viral-BLAST.csv
             ├── sample1_bestSeqs.json
-            └── sample1_visualization.html  ← interactive HTML report ✓
-tapir.log                                ← full pipeline log
+            └── sample1_visualization.html
 ```
 
 ---

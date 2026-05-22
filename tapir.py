@@ -46,6 +46,7 @@ Pipeline steps
   7.  CoverM         — Per-contig mean coverage estimation
   8.  COBRA          — Contig Overlap Based Re-Assembly for genome extension
   9.  ViralQuest     — BLAST + HMM + optional LLM-assisted viral annotation
+  10. Collect results — QC reports, viral FASTAs, and annotation files aggregated into `final_results/`
 
 Dependencies (see README for version requirements)
 ---------------------------------------------------
@@ -1317,6 +1318,105 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
+# ─── Step 10: Collect key results ────────────────────────────────────────────
+
+def step_collect_results(
+    sample: str,
+    sample_out_dir: Path,
+    global_results_dir: Path,
+) -> Path:
+    """
+    Aggregate the most important outputs of a sample into a single flat
+    results directory shared across all samples.
+
+    After a full TAPIR run the per-sample output tree can span gigabytes of
+    intermediate files (BAMs, raw assembly FASTAs, MMseqs2 temporaries, etc.).
+    This step copies only the files a researcher typically needs for downstream
+    analysis and publication directly into ``global_results_dir/`` — flat,
+    with no per-sample subdirectory.  Because every output file already carries
+    the sample name as a prefix (e.g. ``sample1_viral.fa``) there is no risk of
+    name collision when results from multiple samples share the same folder.
+
+    Files collected
+    ---------------
+    From step 1 (fastp)
+      - ``<sample>_fastp.html``          — interactive QC report
+
+    From step 9 (ViralQuest)
+      - ``<sample>_viral.fa``            — final viral sequences (key deliverable)
+      - ``<sample>_viral-BLAST.csv``     — BLAST hit table for all viral contigs
+      - ``<sample>_bestSeqs.json``       — per-sequence annotation summary (JSON)
+      - ``<sample>_visualization.html``  — interactive annotation HTML report
+
+    Missing files are logged as warnings but do not abort the pipeline; the
+    function always completes so that results from other samples are still
+    collected.
+
+    Parameters
+    ----------
+    sample : str
+        Sample identifier used to derive expected source file paths.
+    sample_out_dir : Path
+        Root output directory for this sample (e.g. ``/results/sample1``).
+    global_results_dir : Path
+        Flat destination directory shared across all samples
+        (e.g. ``/results/final_results``).
+
+    Returns
+    -------
+    Path
+        Path to ``global_results_dir`` where files were written.
+    """
+    global_results_dir.mkdir(parents=True, exist_ok=True)
+
+    # ── Define source → destination pairs ────────────────────────────────────
+    # Files are written directly into global_results_dir (no subdirectory).
+    # All filenames already carry the sample prefix, so multiple samples can
+    # coexist in the same folder without collision.
+    vq_out = sample_out_dir / "09_viralquest" / f"OUTPUT_{sample}"
+
+    targets: list[tuple[Path, str]] = [
+        # QC report
+        (sample_out_dir / "01_fastp" / f"{sample}_fastp.html",
+         f"{sample}_fastp.html"),
+        # Final viral sequences
+        (vq_out / f"{sample}_viral.fa",
+         f"{sample}_viral.fa"),
+        # BLAST result table
+        (vq_out / f"{sample}_viral-BLAST.csv",
+         f"{sample}_viral-BLAST.csv"),
+        # Per-sequence JSON annotation
+        (vq_out / f"{sample}_bestSeqs.json",
+         f"{sample}_bestSeqs.json"),
+        # Interactive HTML report
+        (vq_out / f"{sample}_visualization.html",
+         f"{sample}_visualization.html"),
+    ]
+
+    copied, missing_count = 0, 0
+    for file_src, dst_name in targets:
+        dst = global_results_dir / dst_name
+        if file_src.exists():
+            shutil.copy2(file_src, dst)   # copy2 preserves metadata/timestamps
+            log.debug(f"  Collected: {file_src.name} → {dst}")
+            copied += 1
+        else:
+            log.warning(f"  Result file not found, skipping: {file_src}")
+            missing_count += 1
+
+    log.info(
+        _c(GREEN, f"  ✓  Results collected for {sample}: "
+                  f"{copied} file(s) → {global_results_dir}")
+    )
+    if missing_count:
+        log.warning(
+            f"  {missing_count} expected file(s) were missing for {sample}. "
+            "Check the step logs above for errors."
+        )
+
+    return global_results_dir
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # MAIN ENTRY POINT
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1349,8 +1449,16 @@ def main() -> None:
     global log
     log = _setup_logging(log_path)
 
+    # Directory that aggregates the key deliverables from every sample:
+    # fastp QC report, final viral FASTA, and ViralQuest annotation files.
+    # Intermediate files (BAMs, raw assemblies, MMseqs2 temps) remain in
+    # their respective step subdirectories for reproducibility and debugging.
+    final_results_dir = args.output_dir / "final_results"
+    final_results_dir.mkdir(parents=True, exist_ok=True)
+
     log.info(f"TAPIR v{__version__} — pipeline started")
     log.info(f"  Output directory : {args.output_dir}")
+    log.info(f"  Final results    : {final_results_dir}")
     log.info(f"  Threads          : {args.threads}")
     log.info(f"  RAM              : {args.ram} GB")
     log.info(f"  Log file         : {log_path}")
@@ -1513,6 +1621,13 @@ def main() -> None:
             viral_fa = s_out / "09_viralquest" / f"OUTPUT_{sample}" / f"{sample}_viral.fa"
             log.info("⏩  ViralQuest skipped")
 
+        # ── Step 10: Collect key results into final_results/ ─────────────────
+        step_collect_results(
+            sample=sample,
+            sample_out_dir=s_out,
+            global_results_dir=final_results_dir,
+        )
+
         # ── Per-sample summary ────────────────────────────────────────────────
         log.info("")
         log.info(_c(GREEN + BOLD, f"  ✓  {sample} — all steps complete"))
@@ -1523,8 +1638,7 @@ def main() -> None:
                 f"    Viral sequences  : {viral_fa} "
                 f"({_count_sequences(viral_fa):,} sequences)"
             )
-        log.info(f"    HTML report      : "
-                 f"{s_out / '09_viralquest' / f'OUTPUT_{sample}' / f'{sample}_visualization.html'}")
+        log.info(f"    Final results    : {final_results_dir}")
 
     # ── Pipeline summary ──────────────────────────────────────────────────────
     log.info("")
@@ -1532,7 +1646,8 @@ def main() -> None:
     log.info(_c(BOLD + CYAN, f"  TAPIR v{__version__} — pipeline finished"))
     log.info(_c(BOLD + CYAN, f"  {len(pairs)} sample(s) processed"))
     log.info(_c(BOLD + CYAN, "═" * 58))
-    log.info(f"  Full log: {log_path}")
+    log.info(f"  Full log      : {log_path}")
+    log.info(f"  Final results : {final_results_dir}")
 
 
 if __name__ == "__main__":
