@@ -1253,7 +1253,7 @@ def step_viralquest(
 
     cmd: list[str | Path] = [
         "viralquest",
-        "-in",  contigs,
+        "-in",  contigs.resolve(),
         "-out", sample,
         "-cpu", threads,
         "--blastn_online", email,
@@ -1261,18 +1261,19 @@ def step_viralquest(
     ]
 
     # ── Optional databases and HMM files ─────────────────────────────────────
+    # Resolve to absolute paths — ViralQuest runs in out_dir, not the launch dir
     if viral_dmnd:
-        cmd += ["-ref",              viral_dmnd]
+        cmd += ["-ref",              viral_dmnd.resolve()]
     if nr_dmnd:
-        cmd += ["--diamond_blastx",  nr_dmnd]
+        cmd += ["--diamond_blastx",  nr_dmnd.resolve()]
     if rvdb_hmm:
-        cmd += ["-rvdb",             rvdb_hmm]
+        cmd += ["-rvdb",             rvdb_hmm.resolve()]
     if eggnog_hmm:
-        cmd += ["-eggnog",           eggnog_hmm]
+        cmd += ["-eggnog",           eggnog_hmm.resolve()]
     if vfam_hmm:
-        cmd += ["-vfam",             vfam_hmm]
+        cmd += ["-vfam",             vfam_hmm.resolve()]
     if pfam_hmm:
-        cmd += ["-pfam",             pfam_hmm]
+        cmd += ["-pfam",             pfam_hmm.resolve()]
 
     # ── Optional LLM summary ──────────────────────────────────────────────────
     if llm_type and llm_model:
