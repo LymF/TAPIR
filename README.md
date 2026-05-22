@@ -124,38 +124,90 @@ Raw paired-end reads (RNA-seq)  [per sample]
 
 ## Installation
 
-### 1. Clone the repository
+Three installation methods are available. All result in a `tapir` command available in your terminal.
+
+---
+
+### Option A — conda (recommended)
+
+> Installs TAPIR and all external tools in one step.
+> *(bioconda submission pending — use the manual method below until the package is available)*
 
 ```bash
-git clone https://github.com/LymF/tapir.git
-cd tapir
+# Once published to bioconda:
+conda install -c bioconda -c conda-forge tapir-rna
+tapir --help
 ```
 
-### 2. Create the conda environment
-
-Install all conda dependencies in a single command. The `--channel-priority flexible` flag is required to resolve compatibility between bioconda and conda-forge packages:
+**Manual conda install (available now):**
 
 ```bash
+# 1. Clone the repository
+git clone https://github.com/LymF/TAPIR.git
+cd TAPIR
+
+# 2. Create environment with all tools
 mamba create -n tapir python=3.11 \
   -c bioconda -c conda-forge \
   fastp bowtie2 samtools \
   "spades>=3.15" megahit mmseqs2 coverm \
-  --channel-priority flexible \
-  -y
+  --channel-priority flexible -y
 
 conda activate tapir
-```
 
-### 3. Install Python packages
-
-```bash
+# 3. Install Python dependencies and the tapir command
 pip install cobra-meta viralquest biopython
+pip install .
+
+tapir --version
 ```
 
-### 4. Verify installation
+---
+
+### Option B — Docker
+
+> Fully self-contained — no environment setup required.
 
 ```bash
-python tapir.py --version
+# Pull and run
+docker pull ghcr.io/lymf/tapir:latest
+docker run --rm -v /your/data:/data ghcr.io/lymf/tapir:latest \
+    -i /data/reads -o /data/results \
+    --host-genome /data/host.fa \
+    -t 16 --ram 64 --email your@email.edu
+
+# Build locally from source
+git clone https://github.com/LymF/TAPIR.git
+cd TAPIR
+docker build -t tapir .
+docker run --rm -v /your/data:/data tapir \
+    -i /data/reads -o /data/results \
+    --host-genome /data/host.fa \
+    -t 16 --ram 64 --email your@email.edu
+```
+
+> **Note:** Docker does not resolve AVX2 incompatibility — if the host CPU lacks AVX2,
+> see [Tools on servers without AVX2](#tools-on-servers-without-avx2) below.
+
+---
+
+### Option C — pip only
+
+> Installs the `tapir` command; external tools must be installed separately via conda.
+
+```bash
+git clone https://github.com/LymF/TAPIR.git
+cd TAPIR
+pip install .
+tapir --version
+```
+
+---
+
+### Verify installation
+
+```bash
+tapir --version
 # TAPIR 1.0.0
 ```
 

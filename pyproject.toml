@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "tapir-rna"
+version = "1.0.0"
+description = "Transcriptome Assembly Pipeline for Identification of RNA viruses"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+keywords = ["viromics", "metatranscriptomics", "RNA viruses", "bioinformatics", "assembly"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+    "biopython>=1.80",
+    "cobra-meta",
+    "viralquest",
+]
+
+[project.scripts]
+tapir = "tapir:main"
+
+[project.urls]
+Homepage = "https://github.com/LymF/TAPIR"
+Repository = "https://github.com/LymF/TAPIR"
+Issues = "https://github.com/LymF/TAPIR/issues"
+
+[tool.setuptools]
+py-modules = ["tapir"]
