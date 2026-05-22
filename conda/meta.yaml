@@ -1,12 +1,12 @@
 {% set version = "1.0.0" %}
 
 package:
-  name: tapir-rna
+  name: tapir-pipeline
   version: {{ version }}
 
 source:
-  url: https://pypi.io/packages/source/t/tapir-rna/tapir-rna-{{ version }}.tar.gz
-  # sha256 will be filled after PyPI upload
+  url: https://pypi.io/packages/source/t/tapir-pipeline/tapir-pipeline-{{ version }}.tar.gz
+  sha256: c43e425d732284ce3cba3e823829135d5be616c4eb9767b1c7d95badd6c2e853
 
 build:
   number: 0
@@ -14,6 +14,7 @@ build:
   entry_points:
     - tapir = tapir:main
   noarch: python
+  string: py_0
 
 requirements:
   host:
@@ -44,6 +45,7 @@ about:
   license: MIT
   license_file: LICENSE
   summary: "End-to-end pipeline for RNA virus discovery from metatranscriptomic data"
+  dev_url: https://github.com/LymF/TAPIR
   description: |
     TAPIR (Transcriptome Assembly Pipeline for Identification of RNA viruses)
     discovers and annotates RNA viruses from paired-end metatranscriptomic
