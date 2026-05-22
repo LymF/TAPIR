@@ -15,19 +15,16 @@ build:
     - tapir = tapir:main
   noarch: python
   string: py_0
+  post-link: post-link.sh
 
 requirements:
   host:
     - python >=3.11
     - pip
-    - setuptools >=68
+    - setuptools >=61,<77
   run:
     - python >=3.11
-    # Python dependencies
     - biopython >=1.80
-    - cobra-meta
-    - viralquest
-    # External bioinformatics tools
     - fastp
     - bowtie2
     - samtools
@@ -35,6 +32,7 @@ requirements:
     - megahit
     - mmseqs2
     - coverm
+    - pip
 
 test:
   commands:
@@ -45,7 +43,6 @@ about:
   license: MIT
   license_file: LICENSE
   summary: "End-to-end pipeline for RNA virus discovery from metatranscriptomic data"
-  dev_url: https://github.com/LymF/TAPIR
   description: |
     TAPIR (Transcriptome Assembly Pipeline for Identification of RNA viruses)
     discovers and annotates RNA viruses from paired-end metatranscriptomic
