@@ -45,13 +45,13 @@ Raw paired-end reads (RNA-seq)  [per sample]
   │  2. Bowtie2 (host)   │  Align to host genome · Retain unmapped read pairs
   └──────┬───────────────┘
          │ non-host reads
-         ├──────────────────────────────────┐
-         ▼                                  ▼
-  ┌─────────────────┐              ┌──────────────────┐
-  │  3. rnaSPAdes   │              │   4. MEGAHIT      │
-  │  (RNA-aware)    │              │  (meta-sensitive) │
-  └────────┬────────┘              └────────┬──────────┘
-           └───────────────┬────────────────┘
+         ├──────────────────────────┬───────────────────┐
+         ▼                          ▼                   ▼
+  ┌─────────────────┐    ┌──────────────────┐  ┌──────────────────┐
+  │  3a. rnaSPAdes  │    │  3b. SPAdes      │  │   4. MEGAHIT      │
+  │  (RNA-aware)    │    │  (--rnaviral)    │  │  (meta-sensitive) │
+  └────────┬────────┘    └────────┬─────────┘  └────────┬──────────┘
+           └─────────────────────┬┘────────────────────┘
                            ▼
                   ┌────────────────┐
                   │  5. MMseqs2    │  Pool + dereplicate at 95% ANI (per sample)
@@ -295,7 +295,7 @@ TAPIR writes `.done_*` checkpoint files after each step. Re-run the same command
 
 ```bash
 python tapir.py ... --skip-steps fastp host
-# Available: fastp host rnaspades megahit merge mapping coverage cobra cross_sample viralquest
+# Available: fastp host rnaspades rnaviral megahit merge mapping coverage cobra cross_sample viralquest
 ```
 
 ### Local LLM via Ollama

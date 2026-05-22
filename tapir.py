@@ -630,6 +630,71 @@ def step_rnaspades(
     return transcripts
 
 
+# ─── Step 3b: SPAdes --rnaviral assembly ─────────────────────────────────────
+
+def step_rnaviral(
+    r1: Path,
+    r2: Path,
+    out_dir: Path,
+    threads: int,
+    ram_gb: int,
+    sample: str,
+) -> Path:
+    """
+    Assemble reads with SPAdes ``--rnaviral`` mode.
+
+    The ``--rnaviral`` mode was designed specifically for RNA virus discovery
+    in metatranscriptomic data.  Compared to ``--rna`` (rnaSPAdes), it uses
+    lower coverage thresholds, less aggressive graph simplification, and does
+    not assume splicing — all properties that benefit low-abundance RNA viruses.
+
+    Parameters
+    ----------
+    r1, r2 : Path
+        Non-host, quality-trimmed reads.
+    out_dir : Path
+        SPAdes output directory.
+    threads : int
+        CPU threads.
+    ram_gb : int
+        Memory limit in GB passed to SPAdes via ``-m``.
+    sample : str
+        Sample identifier (used only for logging).
+
+    Returns
+    -------
+    Path
+        Path to the assembled contigs FASTA (``contigs.fasta``).
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    done    = out_dir / ".done_rnaviral"
+    contigs = out_dir / "contigs.fasta"
+
+    if _checkpoint_exists(done):
+        return contigs
+
+    _run([
+        "spades.py",
+        "--rnaviral",
+        "-1", r1, "-2", r2,
+        "-o", out_dir,
+        "-t", threads,
+        "-m", ram_gb,
+    ], step="SPAdes rnaviral")
+
+    if not contigs.exists():
+        log.warning(
+            f"SPAdes --rnaviral produced no contigs for {sample}. "
+            "This is normal for samples with very few viral reads."
+        )
+        contigs.touch()
+
+    n = _count_sequences(contigs)
+    log.info(f"  SPAdes rnaviral -> {n:,} assembled contigs")
+    _mark_done(done)
+    return contigs
+
+
 # ─── Step 4: MEGAHIT assembly ─────────────────────────────────────────────────
 
 def step_megahit(
@@ -748,7 +813,10 @@ def step_merge_assemblies(
     combined = out_dir / f"{sample}_combined_raw.fa"
     with open(combined, "w") as fout:
         for fasta in contigs_list:
-            assembler_label = fasta.parent.name  # e.g. "03_rnaspades"
+            if not fasta.exists() or fasta.stat().st_size == 0:
+                log.debug(f"  Skipping empty/missing assembly: {fasta.name}")
+                continue
+            assembler_label = fasta.parent.name  # e.g. "03a_rnaspades"
             with open(fasta) as fin:
                 for line in fin:
                     if line.startswith(">"):
@@ -1485,13 +1553,13 @@ def _build_parser() -> argparse.ArgumentParser:
     ctrl.add_argument(
         "--skip-steps",
         nargs="*",
-        choices=["fastp","host","rnaspades","megahit",
+        choices=["fastp","host","rnaspades","rnaviral","megahit",
                  "merge","mapping","coverage","cobra",
                  "cross_sample","viralquest"],
         default=[],
         metavar="STEP",
         help="Space-separated list of steps to skip. "
-             "Choices: fastp host rnaspades megahit merge mapping coverage cobra "
+             "Choices: fastp host rnaspades rnaviral megahit merge mapping coverage cobra "
              "cross_sample viralquest",
     )
 
@@ -1713,18 +1781,31 @@ def main() -> None:
             r1_nh, r2_nh = r1_qc, r2_qc
             log.info(">>  Host removal skipped")
 
-        # Step 3 - rnaSPAdes
+        # Step 3a - rnaSPAdes
         if "rnaspades" not in args.skip_steps:
             rnaspades_fa = step_rnaspades(
                 r1_nh, r2_nh,
-                out_dir=s_out / "03_rnaspades",
+                out_dir=s_out / "03a_rnaspades",
                 threads=args.threads,
                 ram_gb=args.ram,
                 sample=sample,
             )
         else:
-            rnaspades_fa = s_out / "03_rnaspades" / "transcripts.fasta"
+            rnaspades_fa = s_out / "03a_rnaspades" / "transcripts.fasta"
             log.info(">>  rnaSPAdes skipped")
+
+        # Step 3b - SPAdes rnaviral
+        if "rnaviral" not in args.skip_steps:
+            rnaviral_fa = step_rnaviral(
+                r1_nh, r2_nh,
+                out_dir=s_out / "03b_rnaviral",
+                threads=args.threads,
+                ram_gb=args.ram,
+                sample=sample,
+            )
+        else:
+            rnaviral_fa = s_out / "03b_rnaviral" / "contigs.fasta"
+            log.info(">>  SPAdes rnaviral skipped")
 
         # Step 4 - MEGAHIT
         if "megahit" not in args.skip_steps:
@@ -1745,7 +1826,7 @@ def main() -> None:
         # Step 5 - Cross-assembly dereplication
         if "merge" not in args.skip_steps:
             merged_fa = step_merge_assemblies(
-                contigs_list=[rnaspades_fa, megahit_fa],
+                contigs_list=[rnaspades_fa, rnaviral_fa, megahit_fa],
                 out_dir=s_out / "05_merge",
                 threads=args.threads,
                 sample=sample,
