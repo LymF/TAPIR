@@ -1189,15 +1189,19 @@ def step_viralquest(
     threads: int,
     email: str,
     sample: str,
-    nr_dmnd:      Path | None = None,
-    viral_dmnd:   Path | None = None,
-    rvdb_hmm:     Path | None = None,
-    eggnog_hmm:   Path | None = None,
-    vfam_hmm:     Path | None = None,
-    pfam_hmm:     Path | None = None,
-    llm_type:     str  | None = None,
-    llm_model:    str  | None = None,
-    llm_api_key:  str  | None = None,
+    nr_dmnd:        Path | None = None,
+    viral_dmnd:     Path | None = None,
+    rvdb_hmm:       Path | None = None,
+    eggnog_hmm:     Path | None = None,
+    vfam_hmm:       Path | None = None,
+    pfam_hmm:       Path | None = None,
+    blastn_local:   Path | None = None,
+    blastn_online_db: str = "nt",
+    max_orfs:       int  = 6,
+    cap3:           bool = False,
+    llm_type:       str  | None = None,
+    llm_model:      str  | None = None,
+    llm_api_key:    str  | None = None,
 ) -> Path:
     """
     Identify and annotate viral sequences with ViralQuest.
@@ -1256,9 +1260,14 @@ def step_viralquest(
         "-in",  contigs.resolve(),
         "-out", sample,
         "-cpu", threads,
-        "--blastn_online", email,
-        "--maxORFs", "6",
+        "--blastn_online",   email,
+        "--blastn_onlineDB", blastn_online_db,
+        "--maxORFs",         str(max_orfs),
     ]
+    if blastn_local:
+        cmd += ["-n", blastn_local.resolve()]
+    if cap3:
+        cmd += ["--cap3"]
 
     # ── Optional databases and HMM files ─────────────────────────────────────
     # Resolve to absolute paths — ViralQuest runs in out_dir, not the launch dir
@@ -1537,6 +1546,14 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="Vfam viral protein HMM file")
     vq.add_argument("--pfam-hmm",   type=Path, metavar="PATH",
                     help="Pfam-A HMM file")
+    vq.add_argument("--blastn-local", type=Path, metavar="PATH",
+                    help="Local BLASTn database path (overrides online BLASTn)")
+    vq.add_argument("--blastn-db", metavar="DB", default="nt",
+                    help="NCBI nucleotide database for online BLASTn (default: nt)")
+    vq.add_argument("--max-orfs", type=int, default=6, metavar="N",
+                    help="Max largest non-overlapping ORFs per sequence for ViralQuest (default: 6)")
+    vq.add_argument("--cap3", action="store_true",
+                    help="Enable CAP3 contig assembly within ViralQuest (disabled by default)")
 
     # LLM annotation
     llm = p.add_argument_group("LLM-assisted annotation (ViralQuest)")
@@ -1950,6 +1967,10 @@ def main() -> None:
                     eggnog_hmm=args.eggnog_hmm,
                     vfam_hmm=args.vfam_hmm,
                     pfam_hmm=args.pfam_hmm,
+                    blastn_local=args.blastn_local,
+                    blastn_online_db=args.blastn_db,
+                    max_orfs=args.max_orfs,
+                    cap3=args.cap3,
                     llm_type=args.llm_type,
                     llm_model=args.llm_model,
                     llm_api_key=args.llm_api_key,
