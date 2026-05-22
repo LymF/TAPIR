@@ -25,6 +25,7 @@ requirements:
   run:
     - python >=3.11
     - biopython >=1.80
+    - cobra-meta
     - fastp
     - bowtie2
     - samtools
