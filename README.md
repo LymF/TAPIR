@@ -378,6 +378,10 @@ python tapir.py ... \
 | `--eggnog-hmm` | eggNOG viral HMM |
 | `--vfam-hmm` | Vfam HMM |
 | `--pfam-hmm` | Pfam-A HMM |
+| `--blastn-local PATH` | Local BLASTn database (overrides online BLASTn) |
+| `--blastn-db DB` | NCBI nucleotide database for online BLASTn (default: `nt`) |
+| `--max-orfs N` | Max non-overlapping ORFs per sequence for ViralQuest (default: `6`) |
+| `--cap3` | Enable CAP3 contig assembly within ViralQuest (disabled by default) |
 
 ### LLM annotation
 
