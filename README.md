@@ -106,7 +106,7 @@ Raw paired-end reads (RNA-seq)  [per sample]
 | [fastp](https://github.com/OpenGene/fastp) | ≥ 0.23 | QC and adapter trimming |
 | [Bowtie2](https://github.com/BenLangmead/bowtie2) | ≥ 2.5 | Host removal + read mapping |
 | [SAMtools](https://github.com/samtools/samtools) | ≥ 1.18 | BAM processing |
-| [SPAdes](https://github.com/ablab/spades) (rnaSPAdes) | ≥ 4.0 | RNA-aware assembly |
+| [SPAdes](https://github.com/ablab/spades) (rnaSPAdes) | ≥ 3.15 | RNA-aware assembly |
 | [MEGAHIT](https://github.com/voutcn/megahit) | ≥ 1.2.9 | Complementary assembly |
 | [MMseqs2](https://github.com/soedinglab/MMseqs2) | ≥ 13 | Assembly dereplication |
 | [CoverM](https://github.com/wwood/CoverM) | ≥ 0.6 | Coverage estimation (optional, has fallback) |
@@ -146,7 +146,7 @@ Install all conda dependencies in a single command. The `--channel-priority flex
 mamba create -n tapir python=3.11 \
   -c bioconda -c conda-forge \
   fastp bowtie2 samtools \
-  "spades>=4.0" megahit mmseqs2 coverm \
+  "spades>=3.15" megahit mmseqs2 coverm \
   --channel-priority flexible \
   -y
 
@@ -166,7 +166,7 @@ python tapir.py --version
 # TAPIR 1.0.0
 ```
 
-### MMseqs2 on servers without AVX2
+### Tools on servers without AVX2
 
 Some servers (particularly older CPUs) do not support the AVX2 instruction set required by the default MMseqs2 conda build. To check:
 
@@ -174,7 +174,9 @@ Some servers (particularly older CPUs) do not support the AVX2 instruction set r
 grep -o 'avx2' /proc/cpuinfo | head -1   # empty = no AVX2
 ```
 
-If AVX2 is absent, replace the binary with the SSE4.1 static build:
+If AVX2 is absent, both MMseqs2 and SPAdes 4.x will crash with SIGILL. Fix each as follows:
+
+**MMseqs2** — replace with the SSE4.1 static build:
 
 ```bash
 # Check for SSE4.1
@@ -187,6 +189,12 @@ tar xvf mmseqs-linux-sse41.tar.gz && cp mmseqs/bin/mmseqs $(which mmseqs)
 # If SSE4.1 not available (use SSE2 — always compatible):
 wget https://github.com/soedinglab/MMseqs2/releases/download/13-45111/mmseqs-linux-sse2.tar.gz
 tar xvf mmseqs-linux-sse2.tar.gz && cp mmseqs/bin/mmseqs $(which mmseqs)
+```
+
+**SPAdes** — install version 3.15.5 (compiled without AVX2):
+
+```bash
+mamba install -c bioconda "spades=3.15.5" --channel-priority flexible --force-reinstall
 ```
 
 ---
