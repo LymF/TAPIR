@@ -135,7 +135,7 @@ Three installation methods are available. All result in a `tapir` command availa
 
 ```bash
 # Once published to bioconda:
-conda install -c bioconda -c conda-forge tapir-rna
+conda install -c bioconda -c conda-forge tapir-pipeline
 tapir --help
 ```
 
@@ -196,6 +196,10 @@ docker run --rm -v /your/data:/data tapir \
 > Installs the `tapir` command; external tools must be installed separately via conda.
 
 ```bash
+# From PyPI (recommended):
+pip install tapir-pipeline
+
+# Or from source:
 git clone https://github.com/LymF/TAPIR.git
 cd TAPIR
 pip install .
