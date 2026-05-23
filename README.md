@@ -6,7 +6,7 @@
 
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.0.0-green.svg)]()
+[![Version](https://img.shields.io/badge/version-1.1.0-green.svg)]()
 [![Platform](https://img.shields.io/badge/platform-Linux-lightgrey.svg)]()
 
 </div>
@@ -25,62 +25,19 @@ TAPIR is designed for use with short paired-end Illumina reads and has been test
 
 Steps 1–8 run independently for each sample. Steps 9–10 run once across all samples.
 
-```
-Raw paired-end reads (RNA-seq)  [per sample]
-        │
-        ▼
-  ┌─────────────┐
-  │   1. fastp  │  Adapter trimming · Quality filtering · PE error correction
-  └──────┬──────┘
-         │
-         ▼
-  ┌──────────────────────┐
-  │  2. Bowtie2 (host)   │  Align to host genome · Retain unmapped read pairs
-  └──────┬───────────────┘
-         │ non-host reads
-         ├──────────────────────────┬───────────────────┐
-         ▼                          ▼                   ▼
-  ┌─────────────────┐    ┌──────────────────┐  ┌──────────────────┐
-  │  3a. rnaSPAdes  │    │  3b. SPAdes      │  │   4. MEGAHIT      │
-  │  (RNA-aware)    │    │  (--rnaviral)    │  │  (meta-sensitive) │
-  └────────┬────────┘    └────────┬─────────┘  └────────┬──────────┘
-           └─────────────────────┬┘────────────────────┘
-                           ▼
-                  ┌────────────────┐
-                  │  5. MMseqs2    │  Pool + dereplicate at 95% ANI (per sample)
-                  └───────┬────────┘
-                          │ non-redundant contigs
-              ┌───────────┴───────────┐
-              ▼                       ▼
-    ┌──────────────────┐    ┌──────────────────┐
-    │  6. Bowtie2      │    │  7. CoverM       │
-    │  (reads → asm)   │    │  (coverage TSV)  │
-    └──────────────────┘    └──────────────────┘
-              └───────────────────────┘
-                          │
-                          ▼
-                   ┌──────────┐
-                   │  8. COBRA │  Overlap-based contig extension
-                   └─────┬─────┘
-                         │
-━━━━━━━━━━━━━━━━━━━━━━━━━│━━━━━━━━━━━━━━━━━━━━━━  [global — all samples]
-                         ▼
-              ┌─────────────────────┐
-              │  9. Cross-sample    │  Rename headers (SAMPLE|contig) ·
-              │     consolidation   │  Concatenate merged + COBRA per sample ·
-              │     (MMseqs2)       │  Dereplicate at 95% ANI across all samples
-              └──────────┬──────────┘
-                         │ consolidated FASTA
-                         ▼
-                  ┌─────────────┐
-                  │ 10.ViralQuest│  BLAST · HMM · LLM annotation (one run)
-                  └──────┬──────┘
-                         │
-                         ▼
-               ┌──────────────────┐
-               │  final_results/  │  QC reports · viral FASTA · annotation
-               └──────────────────┘
-```
+| Step | Tool | Description |
+|------|------|-------------|
+| 1 | fastp | Adapter trimming, quality filtering, PE error correction |
+| 2 | Bowtie2 | Host genome decontamination — retain unmapped read pairs |
+| 3a | rnaSPAdes | RNA-aware *de novo* assembly |
+| 3b | SPAdes `--rnaviral` | RNA virus-optimised *de novo* assembly |
+| 4 | MEGAHIT | Meta-sensitive *de novo* assembly |
+| 5 | MMseqs2 | Pool all assemblers + dereplicate at 95% ANI (per sample) |
+| 6 | Bowtie2 | Map cleaned reads back to assembly |
+| 7 | CoverM | Per-contig mean coverage estimation |
+| 8 | COBRA | Overlap-based contig extension |
+| 9 | MMseqs2 | Cross-sample consolidation — concatenate all samples and dereplicate at 95% ANI |
+| 10 | ViralQuest | BLAST + HMM + optional LLM annotation (one run over all samples) |
 
 ---
 
@@ -222,7 +179,7 @@ git clone https://github.com/LymF/TAPIR.git && cd TAPIR && pip install .
 
 ```bash
 tapir --version
-# TAPIR 1.0.0
+# TAPIR 1.1.0
 ```
 
 ### Tools on servers without AVX2
@@ -329,7 +286,7 @@ Custom suffixes can be specified with `--r1-suffix` / `--r2-suffix`.
 ### Minimal run
 
 ```bash
-python tapir.py \
+tapir \
     -i /data/reads \
     -o /results \
     --host-genome /refs/host_genome.fa \
@@ -340,7 +297,7 @@ python tapir.py \
 ### Full run with all databases and LLM annotation
 
 ```bash
-python tapir.py \
+tapir \
     -i /data/reads \
     -o /results \
     --host-genome /refs/host_genome.fa \
@@ -360,7 +317,7 @@ python tapir.py \
 ### Skip host removal (pre-cleaned reads)
 
 ```bash
-python tapir.py -i /data/reads -o /results \
+tapir -i /data/reads -o /results \
     --skip-host-removal \
     -t 32 --ram 128 --email your@email.edu
 ```
@@ -372,14 +329,14 @@ TAPIR writes `.done_*` checkpoint files after each step. Re-run the same command
 ### Skip specific steps
 
 ```bash
-python tapir.py ... --skip-steps fastp host
+tapir ... --skip-steps fastp host
 # Available: fastp host rnaspades rnaviral megahit merge mapping coverage cobra cross_sample viralquest
 ```
 
 ### Local LLM via Ollama
 
 ```bash
-python tapir.py ... \
+tapir ... \
     --llm-type ollama \
     --llm-model qwen3:8b
 # No API key required. Minimum recommended model: qwen3:4b
@@ -464,23 +421,25 @@ python tapir.py ... \
 At the end of the run TAPIR produces two output areas:
 
 - **Per-sample directories** — full intermediate outputs for each sample (steps 1–8).
-- **`final_results/`** — flat directory with key deliverables: per-sample QC reports and the global ViralQuest annotation outputs.
+- **`final_results/`** — key deliverables organised into subfolders.
 
 ### `final_results/` — key deliverables
 
 ```
 results/
 └── final_results/
-    ├── sample1_fastp.html              ← per-sample QC report
-    ├── sample2_fastp.html
-    ├── ...
-    ├── all_samples_viral.fa            ← final viral sequences (all samples) ✓
-    ├── all_samples_viral-BLAST.csv     ← BLAST hit table
+    ├── fastp_reports/
+    │   ├── sample1_fastp.html          ← per-sample QC report
+    │   ├── sample2_fastp.html
+    │   └── ...
+    ├── all_samples_viral.fa            ← final viral sequences (all samples)
+    ├── all_samples_viral-BLAST.tsv     ← BLAST hit table (tab-separated)
     ├── all_samples_bestSeqs.json       ← per-sequence annotation (JSON)
-    └── all_samples_visualization.html  ← interactive annotation report ✓
+    └── all_samples_visualization.html  ← interactive annotation report
 ```
 
-Sequence headers in `all_samples_viral.fa` carry the originating library name as a prefix (`SAMPLE|contigID`), allowing provenance tracking after consolidation.
+Sequence headers in `all_samples_viral.fa` carry full provenance:
+`>{sample}|{assembler}__{original_contig_id}`
 
 ### Full output tree
 
@@ -494,7 +453,7 @@ results/
 │   ├── 02_host_removal/
 │   ├── 03_rnaspades/
 │   ├── 04_megahit/
-│   ├── 05_merge/                       ← per-sample MMseqs2 dereplication
+│   ├── 05_mmseqs/                      ← per-sample dereplication
 │   ├── 06_mapping/
 │   ├── 07_coverage/
 │   └── 08_cobra/
@@ -502,11 +461,11 @@ results/
 ├── 09_cross_sample/
 │   └── all_samples_consolidated.fa     ← cross-sample dereplicated input to ViralQuest
 └── 10_viralquest/
-    └── OUTPUT_all_samples/
-        ├── all_samples_viral.fa
-        ├── all_samples_viral-BLAST.csv
-        ├── all_samples_bestSeqs.json
-        └── all_samples_visualization.html
+    └── all_samples/
+        ├── all_samples_consolidated.fa_viral.fa
+        ├── all_samples_consolidated.fa_viral-BLAST.csv
+        ├── all_samples_consolidated.fa_bestSeqs.json
+        └── all_samples_consolidated.fa_visualization.html
 ```
 
 ---
@@ -528,7 +487,7 @@ results/
 TAPIR writes a hidden `.done_<step>` sentinel file inside each step's output directory after successful completion. On a re-run the pipeline detects these flags and skips completed steps automatically.
 
 - **Resume** an interrupted run: re-run the same command.
-- **Re-run a step**: delete its `.done_*` file (e.g. `rm results/sample1/05_merge/.done_merge`).
+- **Re-run a step**: delete its `.done_*` file (e.g. `rm results/sample1/05_mmseqs/.done_merge`).
 - **Re-run everything**: delete the output directory.
 
 ---
@@ -577,6 +536,6 @@ TAPIR is released under the [MIT License](LICENSE).
 
 ## Contact
 
-For bug reports and feature requests, please use the [GitHub Issues](https://github.com/LymF/tapir/issues) page.
+For bug reports and feature requests, please use the [GitHub Issues](https://github.com/LymF/TAPIR/issues) page.
 
 For general questions, contact: `lucasmelobiomed@gmail.com`

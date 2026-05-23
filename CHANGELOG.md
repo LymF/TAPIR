@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.1.0] — 2026-05-22
+
+### Added
+- **Sample provenance in contig headers**: headers are now set as `{sample}|{assembler}__{contig_id}` starting at step 5 (per-sample MMseqs2), persisting through COBRA and into the consolidated FASTA
+- **Header restoration after ViralQuest**: `_restore_contig_headers()` remaps ViralQuest's internal sequence IDs (e.g. `filename_seq11329`) back to the original `{sample}|assembler__{contig_id}` headers in `_viral.fa`, using sequence-content hashing
+
+### Fixed
+- ViralQuest output path mismatch: collect step was looking for `OUTPUT_{sample}/{sample}_viral.fa` but ViralQuest creates `{sample}/{contigs_name}_viral.fa`
+- HMM and database paths resolved to absolute before passing to ViralQuest (subprocess runs in a different cwd)
+
+### Changed
+- BLAST output is now delivered as **TSV** (`all_samples_viral-BLAST.tsv`) instead of CSV, for easier analysis in R, Python, and spreadsheet tools
+- fastp QC reports are now collected into `final_results/fastp_reports/` subfolder instead of the root `final_results/`
+- Step 9 no longer adds a redundant `{sample}|` prefix to headers (sample name is already embedded at step 5)
+- Usage examples updated from `python tapir.py` to `tapir` command
+
+---
+
 ## [1.0.0] — 2026-05-22
 
 ### Added
