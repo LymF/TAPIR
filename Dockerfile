@@ -2,7 +2,7 @@ FROM condaforge/miniforge3:latest
 
 LABEL maintainer="Lucas Melo <lucasmelobiomed@gmail.com>"
 LABEL description="TAPIR - Transcriptome Assembly Pipeline for Identification of RNA viruses"
-LABEL version="1.0.0"
+LABEL version="1.0.1"
 
 # Install build tools needed to compile Python C extensions (e.g. orfipy)
 RUN apt-get update && apt-get install -y --no-install-recommends \
