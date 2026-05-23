@@ -64,18 +64,6 @@ Steps 1–8 run independently for each sample. Steps 9–10 run once across all 
 | [ViralQuest](https://github.com/gabrielvpina/viralquest) | ≥ 0.1 | Viral identification |
 | [Biopython](https://biopython.org/) | ≥ 1.81 | FASTA utilities |
 
-> **Note on MMseqs2:** Servers without AVX2 support must use the SSE4.1 or SSE2 static binary. See [Installation](#installation) for details.
-
-### Optional — improves ViralQuest sensitivity
-
-| Resource | Description |
-|---|---|
-| DIAMOND nr (`.dmnd`) | NCBI non-redundant protein database |
-| RefSeq viral DIAMOND db | RefSeq viral protein database |
-| RVDB HMM | Reference Viral Database HMM profiles |
-| eggNOG viral HMM | eggNOG viral orthologous group HMMs |
-| Vfam HMM | Viral protein family HMM profiles |
-| Pfam-A HMM | Pfam protein domain HMMs |
 
 ---
 
@@ -181,58 +169,6 @@ git clone https://github.com/LymF/TAPIR.git && cd TAPIR && pip install .
 tapir --version
 # TAPIR 1.1.0
 ```
-
-### Tools on servers without AVX2
-
-Bioconda packages are built on modern machines and may require AVX2. On servers without AVX2 support, SPAdes, MEGAHIT, and MMseqs2 will crash immediately with an illegal instruction error (exit code -4 / SIGILL).
-
-To check:
-
-```bash
-grep -o 'avx2' /proc/cpuinfo | head -1   # empty = no AVX2
-```
-
-The recommended fix is to compile each tool from source directly on the server. CMake will auto-detect the CPU and compile for the available instruction set (SSE4.1, SSE2, etc.), producing a fully compatible binary.
-
-**SPAdes** — compile latest version from source:
-
-```bash
-conda install -c conda-forge cmake make -y
-git clone --branch v4.2.0 --depth 1 https://github.com/ablab/spades.git
-cd spades && ./spades_compile.sh
-cp bin/spades-core $(dirname $(which spades.py))/spades-core
-cd .. && spades.py --version
-```
-
-**MEGAHIT** — compile latest version from source:
-
-```bash
-git clone --branch v1.2.9 --depth 1 https://github.com/voutcn/megahit.git
-cd megahit && git submodule update --init
-mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-make -j$(nproc)
-CONDA_BIN=$(dirname $(which megahit))
-cp megahit megahit_core megahit_toolkit $CONDA_BIN/
-cp megahit_core_popcnt $CONDA_BIN/ 2>/dev/null || true
-cd ../.. && megahit --version
-```
-
-**MMseqs2** — replace with the SSE4.1 static build (v13, stable):
-
-```bash
-grep -o 'sse4_1' /proc/cpuinfo | head -1   # check SSE4.1 support
-
-# SSE4.1 available:
-wget https://github.com/soedinglab/MMseqs2/releases/download/13-45111/mmseqs-linux-sse41.tar.gz
-tar xvf mmseqs-linux-sse41.tar.gz && cp mmseqs/bin/mmseqs $(which mmseqs)
-
-# No SSE4.1 (use SSE2 — always compatible):
-wget https://github.com/soedinglab/MMseqs2/releases/download/13-45111/mmseqs-linux-sse2.tar.gz
-tar xvf mmseqs-linux-sse2.tar.gz && cp mmseqs/bin/mmseqs $(which mmseqs)
-```
-
----
 
 ## Database setup
 
