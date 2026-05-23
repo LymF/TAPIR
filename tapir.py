@@ -1250,7 +1250,8 @@ def step_viralquest(
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     done     = out_dir / ".done_viralquest"
-    viral_fa = out_dir / f"OUTPUT_{sample}" / f"{sample}_viral.fa"
+    # ViralQuest creates {out_dir}/{sample}/{contigs.name}_{type} — not OUTPUT_{sample}
+    viral_fa = out_dir / sample / f"{contigs.name}_viral.fa"
 
     if _checkpoint_exists(done):
         return viral_fa
@@ -1652,16 +1653,18 @@ def _collect_global_viralquest_results(
     vq_sample: str,
     vq_out_dir: Path,
     global_results_dir: Path,
+    contigs_name: str,
 ) -> None:
     """Copy global ViralQuest outputs into the shared results directory."""
     global_results_dir.mkdir(parents=True, exist_ok=True)
-    vq_output = vq_out_dir / f"OUTPUT_{vq_sample}"
+    vq_output = vq_out_dir / vq_sample
+    prefix = contigs_name  # e.g. "all_samples_consolidated.fa"
 
     targets: list[tuple[Path, str]] = [
-        (vq_output / f"{vq_sample}_viral.fa",            f"{vq_sample}_viral.fa"),
-        (vq_output / f"{vq_sample}_viral-BLAST.csv",     f"{vq_sample}_viral-BLAST.csv"),
-        (vq_output / f"{vq_sample}_bestSeqs.json",       f"{vq_sample}_bestSeqs.json"),
-        (vq_output / f"{vq_sample}_visualization.html",  f"{vq_sample}_visualization.html"),
+        (vq_output / f"{prefix}_viral.fa",            f"{vq_sample}_viral.fa"),
+        (vq_output / f"{prefix}_viral-BLAST.csv",     f"{vq_sample}_viral-BLAST.csv"),
+        (vq_output / f"{prefix}_bestSeqs.json",       f"{vq_sample}_bestSeqs.json"),
+        (vq_output / f"{prefix}_visualization.html",  f"{vq_sample}_visualization.html"),
     ]
 
     copied, missing_count = 0, 0
@@ -1979,6 +1982,7 @@ def main() -> None:
                     vq_sample=vq_sample,
                     vq_out_dir=vq_out_dir,
                     global_results_dir=final_results_dir,
+                    contigs_name=consolidated_fa.name,
                 )
                 log.info(f"    Consolidated FASTA : {consolidated_fa}")
                 if viral_fa.exists():
