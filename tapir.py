@@ -64,6 +64,7 @@ Citation: [Pending publication]
 
 # ── Standard library ──────────────────────────────────────────────────────────
 import argparse
+import csv
 import logging
 import os
 import shutil
@@ -821,7 +822,7 @@ def step_merge_assemblies(
                 for line in fin:
                     if line.startswith(">"):
                         seq_id = line[1:].split()[0].strip()
-                        fout.write(f">{assembler_label}__{seq_id}\n")
+                        fout.write(f">{sample}|{assembler_label}__{seq_id}\n")
                     else:
                         fout.write(line)
     log.info(
@@ -1377,7 +1378,7 @@ def step_cross_sample_consolidation(
                                 seen.add(header)
                                 count += 1
                             orig_id = line[1:].split()[0].strip()
-                            header  = f">{sample}|{orig_id}"
+                            header  = f">{orig_id}"  # sample name already embedded since step 5
                             seq_lines = []
                         else:
                             seq_lines.append(line)
@@ -1649,6 +1650,14 @@ def step_collect_results(
     return global_results_dir
 
 
+def _csv_to_tsv(src: Path, dst: Path) -> None:
+    """Convert a comma-separated file to tab-separated."""
+    with open(src, newline="") as fin, open(dst, "w", newline="") as fout:
+        writer = csv.writer(fout, delimiter="\t")
+        for row in csv.reader(fin):
+            writer.writerow(row)
+
+
 def _collect_global_viralquest_results(
     vq_sample: str,
     vq_out_dir: Path,
@@ -1660,15 +1669,16 @@ def _collect_global_viralquest_results(
     vq_output = vq_out_dir / vq_sample
     prefix = contigs_name  # e.g. "all_samples_consolidated.fa"
 
-    targets: list[tuple[Path, str]] = [
-        (vq_output / f"{prefix}_viral.fa",            f"{vq_sample}_viral.fa"),
-        (vq_output / f"{prefix}_viral-BLAST.csv",     f"{vq_sample}_viral-BLAST.csv"),
-        (vq_output / f"{prefix}_bestSeqs.json",       f"{vq_sample}_bestSeqs.json"),
-        (vq_output / f"{prefix}_visualization.html",  f"{vq_sample}_visualization.html"),
+    copy_targets: list[tuple[Path, str]] = [
+        (vq_output / f"{prefix}_viral.fa",           f"{vq_sample}_viral.fa"),
+        (vq_output / f"{prefix}_bestSeqs.json",      f"{vq_sample}_bestSeqs.json"),
+        (vq_output / f"{prefix}_visualization.html", f"{vq_sample}_visualization.html"),
     ]
+    csv_src = vq_output / f"{prefix}_viral-BLAST.csv"
+    tsv_dst = global_results_dir / f"{vq_sample}_viral-BLAST.tsv"
 
     copied, missing_count = 0, 0
-    for file_src, dst_name in targets:
+    for file_src, dst_name in copy_targets:
         dst = global_results_dir / dst_name
         if file_src.exists():
             shutil.copy2(file_src, dst)
@@ -1677,6 +1687,14 @@ def _collect_global_viralquest_results(
         else:
             log.warning(f"  ViralQuest result not found, skipping: {file_src}")
             missing_count += 1
+
+    if csv_src.exists():
+        _csv_to_tsv(csv_src, tsv_dst)
+        log.debug(f"  Converted: {csv_src.name} -> {tsv_dst.name}")
+        copied += 1
+    else:
+        log.warning(f"  ViralQuest result not found, skipping: {csv_src}")
+        missing_count += 1
 
     log.info(
         _c(GREEN, f"  [OK]  ViralQuest results collected: "
