@@ -1184,6 +1184,31 @@ def _collect_cobra_outputs(cobra_dir: Path) -> Path:
 
 # ─── Step 9: Viral identification (ViralQuest) ───────────────────────────────
 
+def _restore_contig_headers(original_fasta: Path, viral_fa: Path) -> None:
+    """Replace ViralQuest-assigned IDs (e.g. filename_seq123) with original headers.
+
+    ViralQuest renames input sequences internally. This function rebuilds the
+    mapping from sequence content (hash) to original header and rewrites viral_fa
+    in-place so downstream files carry sample provenance.
+    """
+    seq_to_id: dict[str, str] = {}
+    for rec in SeqIO.parse(original_fasta, "fasta"):
+        seq_to_id[str(rec.seq).upper()] = rec.id
+
+    tmp = viral_fa.with_suffix(".tmp")
+    remapped = 0
+    with open(tmp, "w") as fout:
+        for rec in SeqIO.parse(viral_fa, "fasta"):
+            orig_id = seq_to_id.get(str(rec.seq).upper())
+            if orig_id:
+                rec.id = orig_id
+                rec.description = ""
+                remapped += 1
+            SeqIO.write(rec, fout, "fasta")
+    tmp.replace(viral_fa)
+    log.debug(f"  Restored {remapped}/{_count_sequences(viral_fa)} contig headers from original FASTA")
+
+
 def step_viralquest(
     contigs: Path,
     out_dir: Path,
@@ -1298,6 +1323,7 @@ def step_viralquest(
     if viral_fa.exists():
         n = _count_sequences(viral_fa)
         log.info(_c(GREEN + BOLD, f"  ViralQuest identified {n:,} viral sequences"))
+        _restore_contig_headers(contigs, viral_fa)
     else:
         log.warning(
             f"ViralQuest output not found at expected path: {viral_fa}\n"
