@@ -1651,16 +1651,16 @@ def step_collect_results(
     Path
         Path to ``global_results_dir`` where files were written.
     """
-    global_results_dir.mkdir(parents=True, exist_ok=True)
+    fastp_dir = global_results_dir / "fastp_reports"
+    fastp_dir.mkdir(parents=True, exist_ok=True)
 
-    targets: list[tuple[Path, str]] = [
+    targets: list[tuple[Path, Path]] = [
         (sample_out_dir / "01_fastp" / f"{sample}_fastp.html",
-         f"{sample}_fastp.html"),
+         fastp_dir / f"{sample}_fastp.html"),
     ]
 
     copied, missing_count = 0, 0
-    for file_src, dst_name in targets:
-        dst = global_results_dir / dst_name
+    for file_src, dst in targets:
         if file_src.exists():
             shutil.copy2(file_src, dst)
             log.debug(f"  Collected: {file_src.name} -> {dst}")
@@ -1671,7 +1671,7 @@ def step_collect_results(
 
     log.info(
         _c(GREEN, f"  [OK]  QC results collected for {sample}: "
-                  f"{copied} file(s) -> {global_results_dir}")
+                  f"{copied} file(s) -> {fastp_dir}")
     )
     return global_results_dir
 
