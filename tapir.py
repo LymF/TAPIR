@@ -85,7 +85,7 @@ except ImportError:
     )
 
 # ─── Version ──────────────────────────────────────────────────────────────────
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 __author__  = "TAPIR developers"
 
 # ─── ANSI terminal colours ────────────────────────────────────────────────────
@@ -1224,7 +1224,7 @@ def step_viralquest(
     blastn_local:   Path | None = None,
     blastn_online_db: str = "nt",
     max_orfs:       int  = 6,
-    cap3:           bool = False,
+    cap3:           bool = True,
     llm_type:       str  | None = None,
     llm_model:      str  | None = None,
     llm_api_key:    str  | None = None,
@@ -1277,7 +1277,7 @@ def step_viralquest(
     out_dir.mkdir(parents=True, exist_ok=True)
     done     = out_dir / ".done_viralquest"
     # ViralQuest creates {out_dir}/{sample}/{contigs.name}_{type} — not OUTPUT_{sample}
-    viral_fa = out_dir / sample / f"{contigs.name}_viral.fa"
+    viral_fa = out_dir / sample / f"{contigs.stem}_viral.fa"
 
     if _checkpoint_exists(done):
         return viral_fa
@@ -1376,7 +1376,7 @@ def step_cross_sample_consolidation(
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     done         = out_dir / ".done_cross_sample_consolidation"
-    consolidated = out_dir / "all_samples_consolidated.fa"
+    consolidated = out_dir / "all_samples_consolidated.fasta"
 
     if _checkpoint_exists(done):
         return consolidated
@@ -1580,8 +1580,8 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="NCBI nucleotide database for online BLASTn (default: nt)")
     vq.add_argument("--max-orfs", type=int, default=6, metavar="N",
                     help="Max largest non-overlapping ORFs per sequence for ViralQuest (default: 6)")
-    vq.add_argument("--cap3", action="store_true",
-                    help="Enable CAP3 contig assembly within ViralQuest (disabled by default)")
+    vq.add_argument("--no-cap3", dest="cap3", action="store_false", default=True,
+                    help="Disable CAP3 contig assembly within ViralQuest (enabled by default)")
 
     # LLM annotation
     llm = p.add_argument_group("LLM-assisted annotation (ViralQuest)")
@@ -1693,7 +1693,7 @@ def _collect_global_viralquest_results(
     """Copy global ViralQuest outputs into the shared results directory."""
     global_results_dir.mkdir(parents=True, exist_ok=True)
     vq_output = vq_out_dir / vq_sample
-    prefix = contigs_name  # e.g. "all_samples_consolidated.fa"
+    prefix = Path(contigs_name).stem  # e.g. "all_samples_consolidated"
 
     copy_targets: list[tuple[Path, str]] = [
         (vq_output / f"{prefix}_viral.fa",           f"{vq_sample}_viral.fa"),
@@ -1984,7 +1984,7 @@ def main() -> None:
                 min_cov=args.cross_sample_cov,
             )
         else:
-            consolidated_fa = args.output_dir / "09_cross_sample" / "all_samples_consolidated.fa"
+            consolidated_fa = args.output_dir / "09_cross_sample" / "all_samples_consolidated.fasta"
             log.info(">>  Cross-sample consolidation skipped by user (--skip-steps cross_sample)")
 
         # ── Step 10: ViralQuest (global) ─────────────────────────────────────
